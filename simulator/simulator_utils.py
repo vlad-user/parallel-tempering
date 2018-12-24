@@ -216,59 +216,7 @@ def generate_experiment_name_safe(model_name=None,
     else:
       return name
 
-  
- 
-# pylint:disable=inconsistent-return-statements, too-many-return-statements, too-many-branches
-def get_value_from_name(full_name, value):
-  """Works for names v7 and higher."""
-  # pylint:disable=no-else-return
-  if value == 'model_name':
-    return full_name.split('_')[0]
 
-  elif value == 'dataset_name':
-    return full_name.split('_')[1]
-
-  elif value == 'separation_ratio':
-    return float(full_name.split('_')[2])
-
-  elif value == 'do_swaps':
-    return full_name.split('_')[3]
-
-  elif value == 'n_replicas':
-    return int(full_name.split('_')[4])
-
-  elif value == 'beta_0':
-    return float(full_name.split('_')[5])
-
-  elif value == 'loss_func_name':
-    return full_name.split('_')[6]
-
-  elif value == 'swap_step':
-    return float(full_name.split('_')[7])
-
-  elif value == 'burn_in_period':
-    return (full_name.split('_')[8])
-
-  elif value == 'learning_rate':
-    return float(full_name.split('_')[9])
-
-  elif value == 'n_epochs':
-    return int(full_name.split('_')[10])
-
-  elif value == 'batch_size':
-    return int(full_name.split('_')[11])
-
-  elif value == 'noise_type':
-    return full_name.split('_')[12]
-
-  elif value == 'proba_coeff':
-    return float(full_name.split('_')[13])
-
-  elif value == 'train_data_size':
-    return full_name.split('_')[3] # instead do_swaps
-
-  else:
-    raise ValueError('Invalid value:', value)
 
 def clean_dirs(dir_):
   """Recursively removes all train, test and validation summary files \
@@ -429,7 +377,7 @@ class GlobalDescriptor(object): # pylint:disable=useless-object-inheritance
 
   # pylint:disable=no-self-use, unused-argument
   def filter_filenames(
-      self, token='v7', model_name=None,
+      self, token='v1', model_name=None,
       learning_rate=None, burn_in_period=None,
       separation_ratio=None, batch_size=None,
       swap_step=None, proba_coeff=None,
@@ -450,8 +398,8 @@ class GlobalDescriptor(object): # pylint:disable=useless-object-inheritance
       locals_['burn_in_period'] = [str(x) for x in locals_['burn_in_period']]
     if train_data_size is not None:
       locals_['train_data_size'] = [str(x) for x in locals_['train_data_size']]
-    path = os.path.join('simulation', 'summaries')
-    path = os.path.join(path, 'compressed')
+    path = os.path.join('simulator', 'summaries')
+    #path = os.path.join(path, 'compressed')
     files = [f for f in os.listdir(path)
              if token in f]
     result = []
@@ -474,3 +422,102 @@ class GlobalDescriptor(object): # pylint:disable=useless-object-inheritance
         result.append(file)
 
     return result
+
+
+def filter_filenames(
+    token='v1', model_name=None,
+    learning_rate=None, burn_in_period=None,
+    separation_ratio=None, batch_size=None,
+    swap_step=None, proba_coeff=None,
+    beta_0=None, n_epochs=None, train_data_size=None):
+  """Filters files that has `token` based on args.
+
+  Returns: A list of files satisfying arguments.
+  """
+  locals_ = locals().copy()
+  locals_.pop('token')
+  keys = list(locals_.keys())
+  _ = [locals_.pop(k) for k in keys if locals_[k] is None]
+  if not all(isinstance(locals_[k], list) for k in locals_):
+    raise TypeError('arguments must be lists')
+
+  if burn_in_period is not None:
+    locals_['burn_in_period'] = [str(x) for x in locals_['burn_in_period']]
+  if train_data_size is not None:
+    locals_['train_data_size'] = [str(x) for x in locals_['train_data_size']]
+  path = os.path.join('simulator', 'summaries')
+  #path = os.path.join(path, 'compressed')
+  files = [f for f in os.listdir(path)
+           if token in f]
+  result = []
+  file_ = 'nn_mnist_1.2_18000_8_100_crossentropy_100_1_0.001_1000_200_betas_5e-06_v7' # example
+  for file in files:
+    bool_test = []
+    for key in locals_:
+      val = get_value_from_name(file, key)
+
+      bool_test.append(val in locals_[key])
+    #if file == file_:
+    #  print(bool_test)
+    #  print([(get_value_from_name(file, k), k, get_value_from_name(file, k) in locals_[k]) for k in locals_])
+    #  print(all(b for b in bool_test))
+    #  #print(get_value_from_name(file_, 'train_data_size'), locals_['train_data_size'])
+    #  print(get_value_from_name(file_, 'train_data_size') in locals_['train_data_size'], locals_['train_data_size'], get_value_from_name(file_, 'train_data_size'))
+
+
+    if all(bool_test):
+      result.append(file)
+
+  return result
+
+# pylint:disable=inconsistent-return-statements, too-many-return-statements, too-many-branches
+def get_value_from_name(full_name, value):
+  """Works for names v7 and higher."""
+  # pylint:disable=no-else-return
+  if value == 'model_name':
+    return full_name.split('_')[0]
+
+  elif value == 'dataset_name':
+    return full_name.split('_')[1]
+
+  elif value == 'separation_ratio':
+    return float(full_name.split('_')[2])
+
+  elif value == 'do_swaps':
+    return full_name.split('_')[3]
+
+  elif value == 'n_replicas':
+    return int(full_name.split('_')[4])
+
+  elif value == 'beta_0':
+    return float(full_name.split('_')[5])
+
+  elif value == 'loss_func_name':
+    return full_name.split('_')[6]
+
+  elif value == 'swap_step':
+    return float(full_name.split('_')[7])
+
+  elif value == 'burn_in_period':
+    return (full_name.split('_')[8])
+
+  elif value == 'learning_rate':
+    return float(full_name.split('_')[9])
+
+  elif value == 'n_epochs':
+    return int(full_name.split('_')[10])
+
+  elif value == 'batch_size':
+    return int(full_name.split('_')[11])
+
+  elif value == 'noise_type':
+    return full_name.split('_')[12]
+
+  elif value == 'proba_coeff':
+    return float(full_name.split('_')[13])
+
+  elif value == 'train_data_size':
+    return full_name.split('_')[3] # instead of do_swaps
+
+  else:
+    raise ValueError('Invalid value:', value)

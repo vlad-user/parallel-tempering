@@ -103,10 +103,10 @@ class Simulator: # pylint: disable=too-many-instance-attributes
                n_epochs,
                name,
                burn_in_period,
+               swap_step,
+               separation_ratio,
                n_simulations=1,
                test_step=500,
-               swap_step=500,
-               separation_ratio=None,
                tuning_parameter_name=None,
                loss_func_name='cross_entropy',
                verbose_loss='zero_one_loss',
@@ -120,61 +120,61 @@ class Simulator: # pylint: disable=too-many-instance-attributes
     """Creates a new simulator object.
 
     Args:
-      model: A function that creates inference model (e.g.
-        see simulation.models.nn_mnist_model)
-      learning_rate: Learning rate for optimizer
-      noise_list: A list (not np.array!) for noise/temperatures/dropout
+      `model`: A function that creates inference model (e.g.
+        see `simulation.models.nn_mnist_model()`)
+      `learning_rate`: Learning rate for optimizer
+      `noise_list`: A list (not np.array!) for noise/temperatures/dropout
         values. In case of dropout (dropout_rmsprop, dropout_gd), noise_list
         represents the values of KEEPING the neurons, and NOT the probability
         of excluding the neurons.
-      noise_type: A string specifying the noise type and optimizer to apply.
+      `noise_type`: A string specifying the noise type and optimizer to apply.
         Possible values could be seen at
-        simulation.simulation_builder.graph_builder.SimulatorGraph.__noise_types
-      batch_size: Batch Size
-      n_epochs: Number of epochs for each simulation
-      name: The name of the simulation. Specifies the a folder name
+        `simulation.simulation_builder.graph_builder.SimulatorGraph.__noise_types`
+      `batch_size`: Batch Size
+      `n_epochs`: Number of epochs for each simulation
+      `name`: The name of the simulation. Specifies the a folder name
         through which a summary files can be later accessed.
-      n_simulatins: Number of simulation to run.
-      test_step: An integer specifing an interval of steps to perform until
+      `n_simulatins`: Number of simulation to run.
+      `test_step`: An integer specifing an interval of steps to perform until
         running a test dataset (1 step equals batch_size)
-      swap_step: An integer specifying an interval to perform until
+      `swap_step`: An integer specifying an interval to perform until
         attempting to swap between replicas based on validation dataset.
-      separation_ratio: A separation ratio between two adjacent temperatures.
+      `separation_ratio`: A separation ratio between two adjacent temperatures.
         This value is not important for simulation because the
         noise_list already contains the separated values. This value is
         (as well as some others) are stored in the simulation
         description file (this file is created by _log_params()
         function).
-      tuning_parameter_name: As the separation_ratio value, this argument is
+      `tuning_parameter_name`: As the separation_ratio value, this argument is
         also not important for simulation. It is stored in the description
         file as well.
-      burn_in_period: A number of steps until the swaps start to be
+      `burn_in_period`: A number of steps until the swaps start to be
         proposed.
-      loss_func_name: A function which we want to optimize. Currently,
-        only cross_entropy and stun (stochastic tunneling) are
+      `loss_func_name`: A function which we want to optimize. Currently,
+        only cross_entropy and STUN (stochastic tunneling) are
         supported.
-      verbose_loss: A loss to print during training. Default is 0-1 loss.
+      `verbose_loss`: A loss to print during training. Default is 0-1 loss.
         Available losses are 'cross_entropy', 'zero_one_loss'.
-      proba_coeff: The coeffecient is used in calculation of probability
+      `proba_coeff`: The coeffecient is used in calculation of probability
         of swaps. Specifically, we have
         P(accept_swap) = exp(proba_coeff*(beta_1-beta_2)(E_1-E_2))
-      description: A custom string that is stored in the description file.
-      test_batch: A size of a data that is fed during evaluation of loss,
+      `description`: A custom string that is stored in the description file.
+      `test_batch`: A size of a data that is fed during evaluation of loss,
         error etc. for test/validation dataset. For MNIST or similar sized
         dataset the whole test/validation data can be fed at once.
-      rmsprop_decay: Used in
+      `rmsprop_decay`: Used in
+        `simulation.simulation_builder.optimizers.RMSPropOptimizer`
+        for noise type `dropout_rmsprop`. This value is ignored for
+        other `noise_types`.
+      `rmsprop_momentum`: Used in
         simulation.simulation_builder.optimizers.RMSPropOptimizer
         for noise type 'dropout_rmsprop'. This value is ignored for
         other noise_types.
-      rmsprop_momentum: Used in
-        simulation.simulation_builder.optimizers.RMSPropOptimizer
-        for noise type 'dropout_rmsprop'. This value is ignored for
-        other noise_types.
-      rmsprop_epsilon: Used in
-        simulation.simulation_builder.optimizers.RMSPropOptimizer
-        for noise type 'dropout_rmsprop'. This value is ignored for
-        other noise_types.
-      flush_every: An integer that defines an interval in seconds that
+      `rmsprop_epsilon`: Used in
+        `simulation.simulation_builder.optimizers.RMSPropOptimizer`
+        for noise type `dropout_rmsprop`. This value is ignored for
+        other `noise_types`.
+      `flush_every`: An integer that defines an interval in seconds that
         currently accumulated training log will be flushed to disk.
         Default is 30 seconds.
 
@@ -201,7 +201,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
     self.rmsprop_decay = rmsprop_decay
     self.rmsprop_momentum = rmsprop_momentum
     self.rmsprop_epsilon = rmsprop_epsilon
-    self.test_batch = (batch_size if test_batch is None else test_batch)
+    self._test_batch = max(2000, batch_size)
     self._logged = False # if log has been written to disk 
     self._flush_every = flush_every
     self._train_step = int(min(self._test_step, self._swap_step) / 2)
@@ -212,13 +212,14 @@ class Simulator: # pylint: disable=too-many-instance-attributes
     """Trains `n_simulations` times using the same setup.
 
     Args:
-      train_data_size: (Optional) Sets the amount of train data out of
+      `train_data_size`: (Optional) Sets the amount of train data out of
         whole data that is used in simulation. If None, the whole data
         is used. Otherwise, each simulation receives `train_data_size`
         shuffled training data. This value is used when it is needed to
         feed only part of the data to the algorithm.
-      kwargs: train_dataset, train_labels, test_data, test_labels,
-        validation_data, validation_labels
+      `kwargs`: Should be following keyword arguments: `train_data`,
+        `train_labels`, `test_data`, `test_labels`, `validation_data`,
+        `validation_labels`.
     """
 
     test_data = kwargs.get('test_data', None)
@@ -265,7 +266,14 @@ class Simulator: # pylint: disable=too-many-instance-attributes
 
 
   def _parallel_tempering_train(self, **kwargs): # pylint: disable=too-many-locals, invalid-name
-    """Trains and swaps between replicas"""
+    """Trains and swaps between replicas.
+    
+    Args:
+      `kwargs`: Should be following keyword arguments: `train_data`,
+        `train_labels`, `test_data`, `test_labels`, `validation_data`,
+        `validation_labels`.
+
+    """
     last_flush_time = time()
     
     if not self._logged:
@@ -310,13 +318,13 @@ class Simulator: # pylint: disable=too-many-instance-attributes
         data = tf.data.Dataset.from_tensor_slices({
             'X':valid_data,
             'y':valid_labels
-            }).batch(self.test_batch)
+            }).batch(self._test_batch)
         iter_valid = data.make_initializable_iterator()
 
         data = tf.data.Dataset.from_tensor_slices({
             'X':test_data,
             'y':test_labels
-            }).batch(self.test_batch)
+            }).batch(self._test_batch)
         iter_test = data.make_initializable_iterator()
 
     except: # pylint: disable=try-except-raise
@@ -354,38 +362,6 @@ class Simulator: # pylint: disable=too-many-instance-attributes
                                step,
                                evaluated[self._n_replicas:],
                                g.get_accept_ratio())
-                '''
-                losses = {i:[] for i in range(g._n_replicas)}
-                errs = {i:[] for i in range(g._n_replicas)}
-                while True:
-                  try:
-
-                    batch = sess.run(next_batch_test)
-                    feed_dict = g.create_feed_dict(batch['X'],
-                                                   batch['y'],
-                                                   'test')
-                    evaluated = sess.run(g.get_train_ops('test'),
-                                         feed_dict=feed_dict)
-                    loss = g.extract_evaluated_tensors(evaluated, 'loss')
-                    err = g.extract_evaluated_tensors(evaluated, 'error')
-
-                    for i in range(g._n_replicas):
-                      losses[i].append(loss[i])
-                      errs[i].append(err[i])
-
-                  except tf.errors.OutOfRangeError:
-                    sess.run(iter_test.initializer)
-                    res_losses = [np.mean(losses[i])
-                                  for i in range(g._n_replicas)]
-                    res_errs = [np.mean(errs[i])
-                                for i in range(g._n_replicas)]
-                    g.add_summary(res_losses + res_errs,
-                                  step,
-                                  dataset_type='test')
-                  
-                    self.print_log(epoch, step, res_errs, g.get_accept_ratio())
-                    break
-                '''
 
               ### validation + swaps ###
               if step % self._swap_step == 0:
@@ -396,37 +372,6 @@ class Simulator: # pylint: disable=too-many-instance-attributes
                 g.add_summary(evaluated, step, dataset_type='validation')
                 if step > self._burn_in_period:
                   g.swap_replicas(evaluated)
-                '''
-                losses = {i:[] for i in range(g._n_replicas)}
-                errs = {i:[] for i in range(g._n_replicas)}
-                
-                while True:
-                  try:
-                    batch = sess.run(next_batch_valid)
-                    feed_dict = g.create_feed_dict(batch['X'],
-                                                   batch['y'],
-                                                   'validation')
-                    evaluated = sess.run(g.get_train_ops('validation'),
-                                         feed_dict=feed_dict)
-                    loss = g.extract_evaluated_tensors(evaluated, 'loss')
-                    err = g.extract_evaluated_tensors(evaluated, 'error')
-
-                    for i in range(g._n_replicas):
-                      losses[i].append(loss[i])
-                      errs[i].append(err[i])
-
-                  except tf.errors.OutOfRangeError:
-                    sess.run(iter_valid.initializer)
-                    res_losses = [np.mean(losses[i]) for i in range(g._n_replicas)]
-                    res_errs = [np.mean(errs[i]) for i in range(g._n_replicas)]
-                    g.add_summary(res_losses + res_errs,
-                                  step,
-                                  dataset_type='validation')
-                    
-                    if step > self._burn_in_period:
-                      g.swap_replicas(res_losses + res_errs)
-                    break
-                '''
 
               ### train ###
               if step % self._train_step == 0 or step == 1:
@@ -504,9 +449,19 @@ class Simulator: # pylint: disable=too-many-instance-attributes
 
 
   def train(self, train_data_size=None, **kwargs):
-    """Trains model a single time.
+    """Trains model a single time using parallel tempering setup.
+    
+    Args:
+      `train_data_size`: (Optional) The size of the train_data. This
+        can be used in case where only part of data should be used
+        while training. It is also possible to pass only a fraction
+        of the data keeping this argument `None`. If `None`, uses
+        the whole data.
+      `kwargs`: Should be following keyword arguments: `train_data`,
+        `train_labels`, `test_data`, `test_labels`, `validation_data`,
+        `validation_labels`.
 
-    This function is basically the same as _parallel_tempering_train"""
+    """
     self._graph = SimulatorGraph(self._model,
                                 self._learning_rate,
                                 self._noise_list,
@@ -543,7 +498,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
 
 
   def _log_params(self):
-    """Creates a description file."""
+    """Creates and stores description file."""
     dirpath = self._graph.get_summary_dirname()
     filepath = os.path.join(dirpath, 'description.json')
     if not os.path.exists(dirpath):
