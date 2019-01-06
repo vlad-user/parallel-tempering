@@ -1,5 +1,4 @@
-"""Various helper functions.
-"""
+"""Various helper functions."""
 import os
 import sys
 import json
@@ -7,15 +6,14 @@ import pickle
 import csv
 from time import time
 
-from tensorboard.backend.event_processing import event_accumulator
 import tensorflow as tf
 import numpy as np
 import pandas as pd
 
 from simulator.exceptions import InvalidExperimentValueError
-from simulator.summary_extractor import SummaryExtractor
 
-DTYPE = tf.float64
+DTYPE = tf.float32
+TRAIN_FREQ = 2
 
 class Timer:
   """Helper for measuring simulation time."""
@@ -27,72 +25,6 @@ class Timer:
     res = int((time() - self.start_time) / 60.0)
     self.start_time = time()
     return res
-
-def extract_summary(log_dir, delim="/"): # pylint: disable=too-many-locals
-  """Extracts summaries from simulation `name`
-
-  Args:
-    log_dir: directory
-    tag: summary name (e.g. cross_entropy, zero_one_loss ...)
-
-  Returns:
-    A dict where keys are names of the summary scalars and
-    vals are numpy arrays of tuples (step, value)
-  """
-  delim = ("\\" if 'win' in sys.platform else '/')
-  compressed_dir = log_dir.replace(
-      'summaries'+delim, 'summaries'+delim+'compressed'+delim)
-  summary_filename = os.path.join(compressed_dir, 'summary.pickle')
-  src_description_file = os.path.join(
-      delim.join(log_dir.split(delim)[:-1]), 'description.json')
-  dst_description_file = (os.path.join(
-      delim.join(compressed_dir.split(delim)[:-1]), 'description.json'))
-
-  # pylint: disable=invalid-name
-  if not os.path.exists(compressed_dir):
-    os.makedirs(compressed_dir)
-
-    with open(src_description_file) as fo:
-      js = json.load(fo)
-
-    with open(dst_description_file, 'w') as fo:
-      json.dump(js, fo, indent=4)
-
-
-  if os.path.exists(summary_filename):
-    with open(summary_filename, 'rb') as fo:
-      res = pickle.load(fo)
-      return res
-  else:
-    sim_num = log_dir.split(delim)[-1]
-    res = {}
-    for file in os.listdir(log_dir):
-      fullpath = os.path.join(log_dir, file)
-      if os.path.isdir(fullpath):
-        for _file in os.listdir(fullpath):
-
-          filename = os.path.join(fullpath, _file)
-
-          ea = event_accumulator.EventAccumulator(filename)
-          ea.Reload()
-          for k in ea.scalars.Keys():
-            lc = np.stack(
-                [np.asarray([scalar.step, scalar.value])
-                 for scalar in ea.Scalars(k)])
-            key_name = sim_num + '/' + file + '/' +  k.split('/')[-1]
-            key_name = '/'.join(key_name.split('/')[-3:])
-            res[key_name] = lc
-
-    with open(summary_filename, 'wb') as fo:
-      pickle.dump(res, fo)
-
-  return res
-
-def extract_and_remove_simulation(path):
-  """Convertes tf summary files to pickle objects and deletes tf files."""
-  se = SummaryExtractor(path) #pylint:disable=invalid-name
-  se._dir.clean_dirs() # pylint: disable=protected-access
-
 
 # pylint:disable=too-many-arguments, too-many-locals
 def generate_experiment_name(model_name=None,
@@ -111,18 +43,28 @@ def generate_experiment_name(model_name=None,
                              proba_coeff=1.0,
                              train_data_size=True,
                              version='v1'):
-  """Experiment name:
-  <arhictecture>_<dataset_name>_<tuning parameter>_<optimizer>_...
-  <dynamic=swaps occure/static=swaps don't occur>_...
-  <n_replicas>_<surface view>_<starting_beta_>...
-    version: 'v2' means that summary stores diffusion value
-    version: 'v3' means added burn-in period
-    version: 'v4' learning_rate has been added
-    version: 'v5' has n_epochs in it
-    version: 'v6' has batch_size and noise_type
-    version: 'v7' has proba coefficient + optimizer has been removed
-      + surface_view + swap_proba has been removed + do_swaps --> train_data_size
+  
   """
+  name:
+    <model_name>
+    <dataset_name>
+    <separation_ratio>
+    <train_data_size>
+    <n_replicas>
+    <beta_0>
+    <loss_func_name>
+    <swap_step>
+    <burn_in_period>
+    <learning_rate>
+    <n_epochs>
+    <batch_size>
+    <noise_type>
+    <proba_coeff>
+    <version>
+  """
+
+
+
   nones = [(x, y)
            for x, y in zip(locals().keys(), locals().values()) if y is None]
   loss_func_name = loss_func_name.replace('_', '')
@@ -156,84 +98,6 @@ def generate_experiment_name(model_name=None,
   name = name + str(proba_coeff) + '_' + version
 
   return name
-
-def generate_experiment_name_safe(model_name=None,
-                                  dataset_name='mnist',
-                                  separation_ratio=None,
-                                  do_swaps=True,
-                                  n_replicas=None,
-                                  beta_0=None,
-                                  loss_func_name='crossentropy',
-                                  swap_step=None,
-                                  burn_in_period=None,
-                                  learning_rate=None,
-                                  n_epochs=None,
-                                  noise_type=None,
-                                  batch_size=None,
-                                  proba_coeff=1.0,
-                                  train_data_size=True,
-                                  version='v1'):
-  """Should be used when computer is busy running simulations. 
-
-  Not safe version may start extraction of the simulation that hasn't been
-  completed. This access may damage the data because when tensorflow 
-  writes a checkpoint file the SummaryExtractor's read may interfere
-  with that. Haven't checked if it corrupts the data but it's better not to
-  play with the fire."""
-  
-  name = generate_experiment_name(model_name=model_name,
-                                   dataset_name=dataset_name,
-                                   separation_ratio=separation_ratio,
-                                   do_swaps=do_swaps,
-                                   n_replicas=n_replicas,
-                                   beta_0=beta_0,
-                                   loss_func_name=loss_func_name,
-                                   swap_step=swap_step,
-                                   burn_in_period=burn_in_period,
-                                   learning_rate=learning_rate,
-                                   n_epochs=n_epochs,
-                                   noise_type=noise_type,
-                                   batch_size=batch_size,
-                                   proba_coeff=proba_coeff,
-                                   train_data_size=train_data_size,
-                                   version='v1')
-  summary_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'summaries')
-  compressed_dir = os.path.join(summary_dir, 'compressed')
-
-  summary_files = os.listdir(summary_dir)
-  compressed_files = os.listdir(compressed_dir)
-  if name in compressed_files and name not in summary_files:
-    return name
-  elif name not in compressed_files:
-    raise ValueError("No such simulation:", name)
-  elif name in summary_files and name in compressed_files:
-    summary_time = os.path.getmtime(os.path.join(summary_dir, name))
-    compressed_time = os.path.getmtime(os.path.join(compressed_dir, name))
-    if time() - summary_time < 180:
-      raise ValueError('The simulation ', 
-                        name,
-                        'is almost ready. Wait a bit...')
-    else:
-      return name
-
-
-
-def clean_dirs(dir_):
-  """Recursively removes all train, test and validation summary files \
-      and folders from previos training life cycles."""
-
-  try:
-    for file in os.listdir(dir_):
-      if os.path.isfile(os.path.join(dir_, file)):
-        os.remove(os.path.join(dir_, file))
-      else:
-        clean_dirs(os.path.join(dir_, file))
-
-    os.rmdir(dir_)
-  except OSError:
-    # if first simulation, nothing to delete
-    return
-
 
 class GlobalDescriptor(object): # pylint:disable=useless-object-inheritance
   """Helper for working with summary files."""
@@ -410,13 +274,6 @@ class GlobalDescriptor(object): # pylint:disable=useless-object-inheritance
         val = get_value_from_name(file, key)
 
         bool_test.append(val in locals_[key])
-      #if file == file_:
-      #  print(bool_test)
-      #  print([(get_value_from_name(file, k), k, get_value_from_name(file, k) in locals_[k]) for k in locals_])
-      #  print(all(b for b in bool_test))
-      #  #print(get_value_from_name(file_, 'train_data_size'), locals_['train_data_size'])
-      #  print(get_value_from_name(file_, 'train_data_size') in locals_['train_data_size'], locals_['train_data_size'], get_value_from_name(file_, 'train_data_size'))
-
 
       if all(bool_test):
         result.append(file)
@@ -446,7 +303,7 @@ def filter_filenames(
   if train_data_size is not None:
     locals_['train_data_size'] = [str(x) for x in locals_['train_data_size']]
   path = os.path.join('simulator', 'summaries')
-  #path = os.path.join(path, 'compressed')
+
   files = [f for f in os.listdir(path)
            if token in f]
   result = []
@@ -457,13 +314,6 @@ def filter_filenames(
       val = get_value_from_name(file, key)
 
       bool_test.append(val in locals_[key])
-    #if file == file_:
-    #  print(bool_test)
-    #  print([(get_value_from_name(file, k), k, get_value_from_name(file, k) in locals_[k]) for k in locals_])
-    #  print(all(b for b in bool_test))
-    #  #print(get_value_from_name(file_, 'train_data_size'), locals_['train_data_size'])
-    #  print(get_value_from_name(file_, 'train_data_size') in locals_['train_data_size'], locals_['train_data_size'], get_value_from_name(file_, 'train_data_size'))
-
 
     if all(bool_test):
       result.append(file)
@@ -472,7 +322,6 @@ def filter_filenames(
 
 # pylint:disable=inconsistent-return-statements, too-many-return-statements, too-many-branches
 def get_value_from_name(full_name, value):
-  """Works for names v7 and higher."""
   # pylint:disable=no-else-return
   if value == 'model_name':
     return full_name.split('_')[0]

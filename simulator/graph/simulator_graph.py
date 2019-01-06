@@ -17,7 +17,7 @@ from simulator.exceptions import InvalidTensorTypeError
 from simulator.exceptions import InvalidNoiseTypeError
 from simulator.simulator_utils import DTYPE
 
-class SimulatorGraph: # pylint: disable=too-many-instance-attributes
+class SimulatorGraph:
   """Defines a dataflow graph with duplicated ensembles.
 
   This object stores all copies of the systems at different
@@ -25,9 +25,52 @@ class SimulatorGraph: # pylint: disable=too-many-instance-attributes
   exchanges between two ensembles and storing the summary
   values. It is used to train models in the
   Parallel Tempering framework.
+
+  # Example:
+  ```python
+  import tensorflow as tf
+  import simulator.models.nn_mnist_model_small as model
+  from simulator.graph.simulator_graph import SimulatorGraph
+  graph = SimulatorGraph(model=model,
+                         learning_rate=0.01,
+                         noise_list=[100, 200],
+                         name='test_simulator_graph',
+                         noise_type='langevin',
+                         )
+  with graph.get_tf_graph().as_default():
+    data = tf.data.Dataset.from_tensor_slices({
+        'X': train_data,
+        'y': train_labels
+    })
+    iterator = data.make_initializable_iterator()
+
+  n_epochs = 5
+  batch_size = 50
+  with graph.get_tf_graph().as_default():
+    sess.run(iterator.initializer)
+    sess.run(graph.variable_initializer)
+    next_batch = iterator.get_next()
+    for epoch in range(n_epochs):
+      try:
+        batch = sess.run(next_batch)
+        feed_dict = graph.create_feed_dict(batch['X'], batch['y'])
+        evaluated = sess.run(graph.get_train_ops(),
+                             feed_dict=feed_dict)
+        loss = graph.extract_evaluated_tensors(evaluated, 'loss')
+        err = graph.extract_evaluated_tensors(evaluated, 'error')
+        print(loss)
+        print(err)
+        graph.add_summary(evaluated, step, dataset_type='train')
+        graph.flush_summary()
+
+      except tf.errors.OutOfRangeError:
+        sess.run(iterator.initializer)
+        break
+    graph.flush_summary()
+  ```
   """
 
-  def __init__(self, model, learning_rate, noise_list, name, # pylint: disable=too-many-locals, too-many-branches, too-many-arguments, too-many-statements
+  def __init__(self, model, learning_rate, noise_list, name,
                noise_type='random_normal', simulation_num=None, 
                loss_func_name='cross_entropy', proba_coeff=1.0,
                rmsprop_decay=0.9, rmsprop_momentum=0.0,
@@ -35,49 +78,51 @@ class SimulatorGraph: # pylint: disable=too-many-instance-attributes
     """Instantiates a new SimulatorGraph object.
 
     Args:
-      model: A function that creates inference model (e.g.
-        see simulation.models.nn_mnist_model)
-      learning_rate: Learning rate for optimizer
-      noise_list: A list (not np.array!) for noise/temperatures/dropout
-        values. In case of dropout (dropout_rmsprop, dropout_gd), noise_list
-        represents the values of KEEPING the neurons, and NOT the probability
-        of excluding the neurons.
-      noise_type: A string specifying the noise type and optimizer to apply.
-        Possible values could be seen at
-        simulator.graph.graph_builder.SimulatorGraph.__noise_types
-      batch_size: Batch Size
-      n_epochs: Number of epochs for each simulation
-      name: A name of the simulation. Specifies the a folder name through which
-          a summary files can be later accessed.
-      simulation_num: Specifies the simulation number that is currently in
-        progress. It is relevant when we simulating the same simulation
-        multiple times. In this case, each simulation is stored in
-        the location: 'summaries/name/simulation_num'.
-      loss_func_name: A function which we want to optimize. Currently,
-        only cross_entropy and stun (stochastic tunneling) are
+      `model`: A function that creates inference model (e.g.
+        see `simulation.models.nn_mnist_model()`).
+      `learning_rate`: Learning rate for optimizer.
+      `noise_list`: A list (not `np.array`!) for
+        noise/temperatures/dropout values. In case of dropout
+        (dropout_rmsprop, dropout_gd), noise_list represents the values
+        of KEEPING the neurons, and NOT the probability of excluding
+        the neurons.
+      `noise_type`: A string specifying the noise type and optimizer
+        to apply. Possible values could be seen at
+        `simulator.graph.graph_builder.SimulatorGraph._noise_types`.
+      `batch_size`: Batch Size.
+      `n_epochs`: Number of epochs for each simulation
+      `name`: A name of the simulation. Specifies the a folder name
+        through which a summary files can be later accessed.
+      `simulation_num`: Specifies the simulation number that is
+        currently in progress. It is relevant when we simulating the
+        same simulation multiple times. In this case, each simulation
+        is stored in the location: 'summaries/name/simulation_num'.
+      `loss_func_name`: A function which we want to optimize. Currently,
+        only `cross_entropy` and `stun` (stochastic tunneling) are
         supported.
-      proba_coeff: The coeffecient is used in calculation of probability
-        of swaps. Specifically, we have
+      `proba_coeff`: The coeffecient is used in calculation of
+        probability of swaps. Specifically, we have
         P(accept_swap) = exp(proba_coeff*(beta_1-beta_2)(E_1-E_2))
-      rmsprop_decay: Used in
+      `rmsprop_decay`: Used in
         simulator.graph.optimizers.RMSPropOptimizer
         for noise type 'dropout_rmsprop'. This value is ignored for
-        other noise_types.
-      rmsprop_momentum: Used in
-        simulator.graph.optimizers.RMSPropOptimizer
+        other `noise_types`.
+      `rmsprop_momentum`: Used in
+        `simulator.graph.optimizers.RMSPropOptimizer`
         for noise type 'dropout_rmsprop'. This value is ignored for
-        other noise_types.
-      rmsprop_epsilon: Used in
-        simulator.graph.optimizers.RMSPropOptimizer
+        other `noise_types`.
+      `rmsprop_epsilon`: Used in
+        `simulator.graph.optimizers.RMSPropOptimizer`
         for noise type 'dropout_rmsprop'. This value is ignored for
-        other noise_types.
+        other `noise_types`.
     """
 
-    self.__noise_types = ['random_normal',
-                          'langevin',
-                          'dropout',
-                          'dropout_rmsprop',
-                          'dropout_gd'] # possible noise types
+    self._noise_types = ['random_normal',
+                         'langevin',
+                         'dropout',
+                         'dropout_rmsprop',
+                         'dropout_gd',
+                         'gd_no_noise'] # possible noise types
 
     if not isinstance(noise_list, list) or not noise_list:
       raise ValueError("Invalid `noise_list`. Should be non-empty python list.")
@@ -101,26 +146,28 @@ class SimulatorGraph: # pylint: disable=too-many-instance-attributes
     res = []
     try:
       res = self._model(tf.Graph())
-      if (len(res) == 3 and
-          noise_type in ['random_normal', 'langevin']):
-        X, y, logits = res # pylint: disable=invalid-name
-        self.X, self.y, logits_list = copy_and_duplicate(X, y, logits, # pylint: disable=invalid-name
-                                                         self._n_replicas,
-                                                         self._graph)
+      with res[0].graph.as_default():
+        self._n_params = np.sum([np.prod(v.get_shape().as_list()) for v in tf.trainable_variables()])
+
+      if (len(res) == 4 and
+          noise_type in ['random_normal', 'langevin', 'gd_no_noise']):
+        X, y, is_train, logits = res
+        self.X, self.y, self.is_train, logits_list = copy_and_duplicate(
+            X, y, is_train, logits, self._n_replicas, self._graph)
 
         # _noise_plcholders will be used to store noise vals for summaries
-        with self._graph.as_default(): # pylint: disable=not-context-manager
+        with self._graph.as_default():
           self._noise_plcholders = {i:tf.placeholder(DTYPE, shape=[])
                                     for i in range(self._n_replicas)}
 
         # curr_noise_dict stores {replica_id:current noise stddev VALUE}
         self._curr_noise_dict = {i:n for i, n in enumerate(self._noise_list)}
 
-      elif (len(res) == 4
+      elif (len(res) == 5
             and noise_type in ['dropout', 'dropout_rmsprop', 'dropout_gd']):
-        X, y, prob_placeholder, logits = res # pylint: disable=invalid-name
-        self.X, self.y, probs, logits_list = copy_and_duplicate(
-            X, y, logits, self._n_replicas, self._graph,
+        X, y, prob_placeholder, logits = res
+        self.X, self.y, self.is_train, probs, logits_list = copy_and_duplicate(
+            X, y, is_train, logits, self._n_replicas, self._graph,
             prob_placeholder)
 
         # _noise_plcholders stores dropout plcholders: {replica_id:plcholder}
@@ -134,14 +181,13 @@ class SimulatorGraph: # pylint: disable=too-many-instance-attributes
             i:n
             for i, n in enumerate(sorted(self._noise_list, reverse=True))}
 
-      elif noise_type not in self.__noise_types:
-        raise InvalidNoiseTypeError(noise_type, self.__noise_types)
+      elif noise_type not in self._noise_types:
+        raise InvalidNoiseTypeError(noise_type, self._noise_types)
 
       else:
         raise InvalidModelFuncError(len(res), self._noise_type)
 
     except Exception as exc:
-      
       raise Exception("Problem with inference model function.") from exc
 
     # from here, everything that goes after logits is created
@@ -159,10 +205,11 @@ class SimulatorGraph: # pylint: disable=too-many-instance-attributes
           elif self._loss_func_name in ['stun']:
             loss_func = self._stun_loss
           else:
-            raise ValueError('Invalid loss function name.',
-                             'Available functions are: \
-                             cross_entropy/stun,',
-                             'But given:', self._loss_func_name)
+            err_msg = ("Invalid loss function name. "
+                       "Available function names are: "
+                       "cross_entropy/stun. But given: ")
+            err_msg += self._loss_func_name
+            raise ValueError(err_msg)
           
           self._loss_dict[i] = loss_func(
               self.y, logits_list[i])
@@ -186,20 +233,22 @@ class SimulatorGraph: # pylint: disable=too-many-instance-attributes
                 decay=rmsprop_decay, momentum=rmsprop_momentum,
                 epsilon=rmsprop_epsilon)
 
-          elif noise_type.lower() in ['dropout_gd', 'dropout']:
+          elif noise_type.lower() in ['dropout_gd', 'dropout', 'gd_no_noise']:
             optimizer = GDOptimizer(
                 self._learning_rate, i, self._noise_list)
 
           else:
-            raise InvalidNoiseTypeError(noise_type, self.__noise_types)
+            raise InvalidNoiseTypeError(noise_type, self._noise_types)
           optimizer.minimize(self._loss_dict[i])
           self._optimizer_dict[i] = optimizer
 
 
       self._summary = Summary(self._name,
                               self._optimizer_dict,
+                              self._n_params,
                               simulation_num)
       self.variable_initializer = tf.global_variables_initializer()
+      
       # flush summary on exit
       atexit.register(self._summary.flush_summary)
       
@@ -217,16 +266,17 @@ class SimulatorGraph: # pylint: disable=too-many-instance-attributes
     Returns:
       A dictionary to feed into session's run.
       If `dataset_type` == 'train', adds to feed_dict placeholders
-      to store noise (for summary).
+      to store noise (for summary) and sets `is_train` placeholder
+      to `True`.
       If `dataset_type` == 'validation'/'test', then doesn't add
-      this placeholder (since we don't add noise for test or
-      validation).
+      this noise placeholder (since we don't add noise for test or
+      validation) and sets `is_train` placeholder to `False`.
       If noise_type is 'dropout' and dataset_type is 'train',
       adds values for keeping parameters during optimization
       (placeholders `keep_prob` for each replica).
 
     Raises:
-      InvalidDatasetTypeError: if incorrect `dataset_type`.
+      `InvalidDatasetTypeError`: if incorrect `dataset_type`.
     """
 
     feed_dict = {self.X:X_batch, self.y:y_batch}
@@ -250,24 +300,28 @@ class SimulatorGraph: # pylint: disable=too-many-instance-attributes
       dict_ = {}
 
     feed_dict.update(dict_)
-
+    if dataset_type == 'train':
+      feed_dict.update({self.is_train:True})
+    else:
+      feed_dict.update({self.is_train:False})
     return feed_dict
 
-  def get_train_ops(self, dataset_type='train', include_diffusion=False):
+  def get_train_ops(self, dataset_type='train', special_ops=False):
     """Returns train ops for session's run.
 
     The returned list should be used as:
     # evaluated = sess.run(get_train_ops(), feed_dict=...)
 
     Args:
-      dataset_type: One of 'train'/'test'/'validation'
-      include_diffusion: If True, includes ops for calculating diffusion.
+      `dataset_type`: One of 'train'/'test'/'validation'
+      `special_ops`: If `True`, adds diffusion, gradients and weight's
+        norms ops.
 
     Returns:
-      train_ops for session run.
+      A list of train ops.
 
     Raises:
-      InvalidDatasetTypeError: if incorrect dataset_type.
+      `InvalidDatasetTypeError`: if incorrect `dataset_type`.
     """
 
     if dataset_type not in ['train', 'test', 'validation']:
@@ -279,7 +333,7 @@ class SimulatorGraph: # pylint: disable=too-many-instance-attributes
                      for i in range(self._n_replicas)]
     res = loss + error
     
-    if include_diffusion:
+    if special_ops:
       res += self._summary.get_diffusion_ops()
       res += self._summary.get_grad_norm_ops()
       res += self._summary.get_norm_ops()
@@ -304,11 +358,11 @@ class SimulatorGraph: # pylint: disable=too-many-instance-attributes
     ```
 
     Args:
-      evaluated: A list returned by `sess.run(get_train_ops())`
-      step: A value that is incremented after each mini-batch.
-      epoch: (Optional) A current epoch that allows accuratly show
-        the progress during training via SummaryExtractor class.
-      dataset_type: One of 'train'/'test'/'validation'.
+      `evaluated`: A list returned by `sess.run(get_train_ops())`
+      `step`: A value that is incremented after each mini-batch.
+      `epoch`: (Optional) A current epoch that allows accuratly show
+        the progress during training via `SummaryExtractor` class.
+      `dataset_type`: One of 'train'/'test'/'validation'.
 
     """
 
@@ -343,9 +397,9 @@ class SimulatorGraph: # pylint: disable=too-many-instance-attributes
       error_dict[i].append(error[i])
     steps.append(step)
 
-    # add diffusion if exists in the `evaluated` list
+    # add diffusion, grad norms and weight norms if in the `evaluated`.
     if has_diffusion_ops():
-      diffusion = self.extract_evaluated_tensors(evaluated, 'diffusion') 
+      diffusion = self.extract_evaluated_tensors(evaluated, 'special_vals') 
       for i in range(self._n_replicas):
         self._summary._diffusion_vals[i].append(diffusion[i])
         self._summary._grads_vals[i].append(diffusion[i+self._n_replicas])
@@ -371,14 +425,14 @@ class SimulatorGraph: # pylint: disable=too-many-instance-attributes
     ```
 
     Args:
-      evaluated: A list returned by sess.run(get_train_ops())
-      tensor_type: One of 'loss'/'error'/'diffusion'
+      `evaluated`: A list returned by sess.run(get_train_ops())
+      `tensor_type`: One of 'loss'/'error'/'special_ops'
 
     Returns:
       A list of specified (by `tensor_type`) tensor values.
 
     Raises:
-      InvlaidLossFuncError: Incorrect `tensor_type` value.
+      `InvlaidLossFuncError`: Incorrect `tensor_type` value.
       """
 
     if tensor_type == 'loss': # pylint: disable=no-else-return
@@ -387,27 +441,24 @@ class SimulatorGraph: # pylint: disable=too-many-instance-attributes
     elif tensor_type == 'error':
       return evaluated[self._n_replicas:self._n_replicas*2]
 
-    elif tensor_type == 'diffusion': # includes diffusion, grad_norms, weight_norms
+    elif tensor_type == 'special_vals': # includes diffusion, grad_norms, weight_norms
       return evaluated[self._n_replicas*2:self._n_replicas*5]
 
     else:
       raise InvalidTensorTypeError()
 
-  def swap_replicas(self, evaluated): # pylint: disable=too-many-locals
-    """Swaps between replicas.
+  def swap_replicas(self, evaluated):
+    """Swaps between two replicas with adjacent noise levels.
 
     Swaps according to:
       1. Uniformly randomly select a pair of adjacent temperatures
         1/beta_i and 1/beta_i+1, for which swap move is proposed.
       2. Accepts swap with probability:
-          min{1, exp(proba_coeff*(beta_i-beta_i+1)*(loss_i-loss_i+1)}
+          `min{1, exp(proba_coeff*(beta_i-beta_i+1)*(loss_i-loss_i+1)}`
       3. Updates the acceptance ratio for the proposed swap.
 
     Args:
-      evaluated: a list returned by sess.run(get_train_ops())
-
-    Raises:
-      ValueError: if invalid `surface_view`.
+      `evaluated`: a list returned by `sess.run(get_train_ops())`.
     """
     random_pair = random.choice(range(self._n_replicas - 1)) # pair number
 
@@ -459,7 +510,7 @@ class SimulatorGraph: # pylint: disable=too-many-instance-attributes
     tf.summary.FileWriter(path, self._graph).close()
 
   def _cross_entropy_loss(self, y, logits, clip_value_max=2000.0): # pylint: disable=invalid-name, no-self-use
-    """Cross entropy on cpu"""
+    """Cross entropy."""
     with tf.name_scope('cross_entropy'):
       with tf.device('/cpu:0'):
         cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -470,10 +521,10 @@ class SimulatorGraph: # pylint: disable=too-many-instance-attributes
     return loss
 
   def _error(self, y, logits): # pylint: disable=invalid-name, no-self-use
-    """0-1 loss"""
+    """0-1 error."""
     with tf.name_scope('error'):
       with tf.device('/cpu:0'):
-        # input arg `perdictions` to tf.nn.in_top_k must be of type tf.float32
+        # input arg `predictions` to tf.nn.in_top_k must be of type tf.float32
         y_pred = tf.nn.in_top_k(predictions=tf.cast(logits, tf.float32),
                                 targets=y,
                                 k=1)

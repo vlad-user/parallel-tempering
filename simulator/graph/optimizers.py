@@ -8,6 +8,8 @@ import numpy as np
 from simulator.graph.device_placer import _gpu_device_name
 from simulator.simulator_utils import DTYPE
 
+NUMPY_DTYPE = (np.float64 if DTYPE == tf.float64 else np.float32)
+
 class Optimizer:
   """Wrapper for tf.train.GradientDescentOptimizer"""
   def __init__(self, learning_rate, replica_id, noise_list=None, # pylint: disable=too-many-arguments
@@ -157,7 +159,7 @@ class GDLDOptimizer(NormalNoiseGDOptimizer):
   def apply_gradients(self, grads_and_vars, beta): # pylint: disable=arguments-differ
     with tf.device(_gpu_device_name(self.replica_id)):
 
-      c = tf.sqrt(np.float64(self.learning_rate/beta)) # pylint: disable=invalid-name
+      c = tf.sqrt(NUMPY_DTYPE(self.learning_rate/beta)) # pylint: disable=invalid-name
       ops_ = [tf.assign(
           v,
           v - self.learning_rate*g - c*tf.random_normal(v.shape, stddev=1, dtype=DTYPE))
@@ -172,7 +174,7 @@ class GDOptimizer(Optimizer):
         learning_rate, replica_id, noise_list)
 
   def set_train_route(self, route): # pylint: disable=unused-argument, no-self-use
-    """Don't do anything. Added for consistency with other optimizers."""
+    """Doesn't do anything. Added for consistency with other optimizers."""
     return
 
 class RMSPropOptimizer(Optimizer):
@@ -186,7 +188,7 @@ class RMSPropOptimizer(Optimizer):
         use_locking, centered)
 
 
-  def _initializer( # pylint: disable=too-many-arguments, attribute-defined-outside-init
+  def _initializer(
       self, learning_rate, replica_id, noise_list,
       decay=0.9, momentum=0.001, epsilon=1e-6,
       use_locking=None, centered=None):
@@ -200,17 +202,15 @@ class RMSPropOptimizer(Optimizer):
     self.trainable_variables = None
     self._grads = []
 
-
-
   def minimize(self, loss):
     self.trainable_variables = self._get_dependencies(loss) # pylint: disable=attribute-defined-outside-init
     with tf.device(_gpu_device_name(self.replica_id)):
-      self.train_op = self.tf_optimizer.minimize(loss) # pylint: disable=attribute-defined-outside-init
+      self.train_op = self.tf_optimizer.minimize(loss)
     var_list = self._get_dependencies(loss)
     grads_and_vars = self.tf_optimizer.compute_gradients(loss, var_list)
     self._grads = [g for g, v in grads_and_vars]
     return self.train_op
 
   def set_train_route(self, route): # pylint: disable=unused-argument, no-self-use
-    """Don't do anything. Added for consistency with other optimizers."""
+    """Doesn't do anything. Added for consistency with other optimizers."""
     return

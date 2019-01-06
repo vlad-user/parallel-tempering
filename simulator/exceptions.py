@@ -4,7 +4,7 @@ class InvalidTensorTypeError(Exception):
   pass
 
   def __str__(self, ):
-    return "Available tensor types are: 'cross_entropy', 'error', 'diffusion'."
+    return "Available tensor types are: 'cross_entropy', 'error', 'special_vals'."
 
 class InvalidDatasetTypeError(Exception): # pylint: disable=missing-docstring
   pass # pylint: disable=unnecessary-pass
@@ -19,13 +19,15 @@ class InvalidModelFuncError(Exception): # pylint: disable=missing-docstring
   def __init__(self, len_res, noise_type): # pylint: disable=super-init-not-called
     self.len_res = str(len_res)
     self.noise_type = str(noise_type)
-    msg = "`model` function must return 3 variables if noise_type is "
-    msg = msg + ("'random_normal'/'langevin'  and 4 variables if "
-                 + "`noise_type` is 'dropout'. ")
-    msg = msg + "The given `model` function returns " + self.len_res
-    msg = msg + (" variables and given `noise_type` is " + "'"
-                 + self.noise_type + "'")
-    self.msg = msg
+    err_msg = ("`model` function must return 4 variables if "
+               "`noise_type` is `random_normal`/`langevin`/"
+               "`gd_no_noise` and 5 variables if `noise_type` is "
+               "`dropout`/`dropout_rmsprop`/`dropout`. "
+               "The given `model` function returns "
+               + self.len_res + " variables and given `noise_type`"
+               + "is " + self.noise_type + ".")
+
+    self.msg = err_msg
 
   def __str__(self):
     return self.msg
@@ -33,10 +35,11 @@ class InvalidModelFuncError(Exception): # pylint: disable=missing-docstring
 class NoGpusFoundError(Exception): # pylint: disable=missing-docstring
   pass # pylint: disable=unnecessary-pass
   def __init__(self): # pylint: disable=super-init-not-called
+    err_msg = ("No gpus found. To remove this exception and execute on "
+               "the CPU set `RAISE_IF_NO_GPU flag to false in the "
+               "`device_placer` module.")
 
-    msg = 'No gpus found. (To remove this exception and execute on CPU, '
-    msg = msg + 'set RAISE_IF_NO_GPU flag to false in device_placer.py file)'
-    self.msg = msg
+    self.msg = err_msg
 
   def __str__(self):
 
@@ -45,8 +48,8 @@ class NoGpusFoundError(Exception): # pylint: disable=missing-docstring
 class InvalidLossFuncError(Exception): # pylint: disable=missing-docstring
   pass # pylint: disable=unnecessary-pass
   def __init__(self): # pylint: disable=super-init-not-called
-    msg = ('Invalid loss function. Possible functions are: '
-           +'`cross_entropy` and `zero_one_loss`')
+    msg = ("Invalid loss function. Possible functions are: "
+           "`cross_entropy` and `stun`")
     self.msg = msg
 
   def __str__(self):
@@ -74,6 +77,7 @@ class InvalidExperimentValueError(Exception): # pylint: disable=missing-docstrin
       msg = msg + "The following args have None values:\n"
       msg = msg + ", ".join([str(x[0])+':'+str(x[1]) for x in nones])
       msg = msg + "\n"
+
     msg = msg + 'Valid args are: \n'
     msg = msg + "model_name: 'nn/cnn' + \\{ 075, 125...\\} \n"
     msg = msg + "dataset: 'mnist' or 'cifar' \n"
@@ -98,4 +102,3 @@ class InvalidExperimentValueError(Exception): # pylint: disable=missing-docstrin
 
 class IllegalArgumentError(ValueError):
   pass
-

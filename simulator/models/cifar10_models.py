@@ -145,6 +145,157 @@ def cnn_cifar10_model(graph):
 
   return X, y, keep_prob, logits
 
+def cnn_cifar10_nodropout_small(graph):
+  with graph.as_default():
+    with tf.name_scope('Input'):
+      with tf.name_scope('X'):
+        X = tf.placeholder(DTYPE, shape=[None, 32*32*3], name='X')
+        X_reshaped = tf.reshape(X, shape=[-1, 32, 32, 3])
+
+      with tf.name_scope('y'):
+        y = tf.placeholder(tf.int32, shape=[None], name='y')
+
+    with tf.name_scope('conv1'):
+      conv1 = tf.layers.conv2d(X_reshaped,
+                               filters=6,
+                               kernel_size=5,
+                               strides=1,
+                               padding='valid',
+                               activation=tf.nn.relu,
+                               name='conv1'
+                               )
+      max_pool1 = tf.nn.max_pool(value=conv1,
+                                 ksize=(1, 2, 2, 1),
+                                 strides=(1, 2, 2, 1),
+                                 padding='VALID',
+                                 name='max_pool1')
+    with tf.name_scope('conv2'):
+      conv2 = tf.layers.conv2d(max_pool1,
+                               filters=12,
+                               kernel_size=3,
+                               strides=1,
+                               padding='valid',
+                               activation=tf.nn.relu,
+                               name='conv2')
+      max_pool2 = tf.nn.max_pool(value=conv2,
+                                 ksize=(1, 2, 2, 1),
+                                 strides=(1, 2, 2, 1),
+                                 padding='VALID',
+                                 name='max_pool2')
+
+    with tf.name_scope('logits'):
+      flatten = tf.layers.Flatten()(max_pool2)
+      logits = nn_layer(X=flatten, n_neurons=10, name='logits', activation=None)
+
+  return X, y, logits
+
+def cnn_cifar10_nodropout_small_batch_norm(graph):
+
+  with graph.as_default():
+    is_train = tf.placeholder(tf.bool, shape=(), name='is_train')
+
+    with tf.name_scope('Input'):
+      with tf.name_scope('X'):
+        X = tf.placeholder(DTYPE, shape=[None, 32*32*3], name='X')
+        X_reshaped = tf.reshape(X, shape=[-1, 32, 32, 3])
+
+      with tf.name_scope('y'):
+        y = tf.placeholder(tf.int32, shape=[None], name='y')
+    
+    with tf.name_scope('conv1'):
+      conv1 = tf.layers.conv2d(X_reshaped,
+                               filters=6,
+                               kernel_size=5,
+                               strides=1,
+                               padding='valid',
+                               activation=tf.nn.relu,
+                               name='conv1'
+                               )
+      #print('conv1 type', conv1.dtype)
+      #print('conv1', get_shape(conv1))
+      max_pool1 = tf.nn.max_pool(value=conv1,
+                                 ksize=(1, 2, 2, 1),
+                                 strides=(1, 2, 2, 1),
+                                 padding='VALID',
+                                 name='max_pool1')
+      #print('max_pool1', get_shape(max_pool1))
+      #print('max_pool1 type', max_pool1.dtype)
+      #batch_norm1 = tf.layers.batch_normalization(
+      #    max_pool1, training=is_train)
+      #print('batch_norm1 type', batch_norm1.dtype)
+      #print('batch_norm1', get_shape(batch_norm1))
+    with tf.name_scope('conv2'):
+      conv2 = tf.layers.conv2d(max_pool1,
+                               filters=12,
+                               kernel_size=3,
+                               strides=1,
+                               padding='valid',
+                               activation=tf.nn.relu,
+                               name='conv2')
+      #print('conv2', get_shape(conv2))
+      #print('conv2 type', conv2.dtype)
+      max_pool2 = tf.nn.max_pool(value=conv2,
+                                 ksize=(1, 2, 2, 1),
+                                 strides=(1, 2, 2, 1),
+                                 padding='VALID',
+                                 name='max_pool2')
+      #print('max_pool2', get_shape(max_pool2))
+      #print('max_poo2', max_pool2.dtype)
+      #batch_norm2 = tf.layers.batch_normalization(
+      #    max_pool2, training=is_train)
+      #print('batch_norm2', get_shape(batch_norm2))
+      #print('batch_norm2 type', batch_norm2.dtype)
+
+      flatten = tf.layers.Flatten()(max_pool2)
+
+    with tf.name_scope('logits'):
+      logits = nn_layer(X=flatten, n_neurons=10, name='logits', activation=None, dtype=DTYPE)
+
+  return X, y, is_train, logits,
+
+def cnn_cifar10_nodropout_small(graph):
+  with graph.as_default():
+    with tf.name_scope('Input'):
+      with tf.name_scope('X'):
+        X = tf.placeholder(DTYPE, shape=[None, 32*32*3], name='X')
+        X_reshaped = tf.reshape(X, shape=[-1, 32, 32, 3])
+
+      with tf.name_scope('y'):
+        y = tf.placeholder(tf.int32, shape=[None], name='y')
+
+    with tf.name_scope('conv1'):
+      conv1 = tf.layers.conv2d(X_reshaped,
+                               filters=6,
+                               kernel_size=5,
+                               strides=1,
+                               padding='valid',
+                               activation=tf.nn.relu,
+                               name='conv1'
+                               )
+      max_pool1 = tf.nn.max_pool(value=conv1,
+                                 ksize=(1, 2, 2, 1),
+                                 strides=(1, 2, 2, 1),
+                                 padding='VALID',
+                                 name='max_pool1')
+    with tf.name_scope('conv2'):
+      conv2 = tf.layers.conv2d(max_pool1,
+                               filters=12,
+                               kernel_size=3,
+                               strides=1,
+                               padding='valid',
+                               activation=tf.nn.relu,
+                               name='conv2')
+      max_pool2 = tf.nn.max_pool(value=conv2,
+                                 ksize=(1, 2, 2, 1),
+                                 strides=(1, 2, 2, 1),
+                                 padding='VALID',
+                                 name='max_pool2')
+
+    with tf.name_scope('logits'):
+      flatten = tf.layers.Flatten()(max_pool2)
+      logits = nn_layer(X=flatten, n_neurons=10, name='logits', activation=None)
+
+  return X, y, logits
 
 def cnn_cifar10_model4(graph):
   height = 32
@@ -234,7 +385,7 @@ def cnn_cifar10_model3(graph):
   with graph.as_default():
     with tf.name_scope('Input'):
       with tf.name_scope('X'):
-        X = tf.placeholder( DTYPE, 
+        X = tf.placeholder(DTYPE, 
                   shape=[None, n_inputs], 
                   name='X')
         X_reshaped = tf.reshape(X, 
@@ -395,188 +546,3 @@ def _variable_with_weight_decay(name, shape, stddev, wd):
   #tf.add_to_collection('losses', weight_decay)
   
   return var
-
-def cnn_cifar10_test(graph):
-  # test
-  with graph.as_default():
-    with tf.name_scope('Inputs'):
-      X = tf.placeholder(DTYPE, shape=(None, 3072), name='X')
-      X_reshaped = tf.reshape(X, shape=[-1, 32, 32, 3], name='X_reshaped')
-      #X = tf.placeholder(DTYPE, shape=(None, 32, 32, 3), name='X')
-      y = tf.placeholder(tf.int32, shape=(None), name='y')
-
-    with tf.name_scope('CNN'):
-
-      conv1_filter = tf.Variable(tf.truncated_normal(shape=[3, 3, 3, 64], mean=0, stddev=0.08),
-                                 name='filter1')
-      conv2_filter = tf.Variable(tf.truncated_normal(shape=[3, 3, 64, 128], mean=0, stddev=0.08),
-                                 name='filter2')
-      conv3_filter = tf.Variable(tf.truncated_normal(shape=[5, 5, 128, 256], mean=0, stddev=0.08),
-                                 name='filter3')
-      conv4_filter = tf.Variable(tf.truncated_normal(shape=[5, 5, 256, 512], mean=0, stddev=0.08),
-                                 name='filter4')
-
-      # 1, 2
-      with tf.name_scope('conv1'):
-        #print(get_shape(X_reshaped))
-        #print(get_shape(conv1_filter))
-        conv1 = tf.nn.conv2d(X_reshaped, conv1_filter, strides=[1,1,1,1], padding='SAME')
-        #print(get_shape(conv1))
-        conv1 = tf.nn.relu(conv1)
-        conv1_pool = tf.nn.max_pool(conv1, ksize=[1,2,2,1], strides=[1,2,2,1], padding='SAME')
-        conv1_bn = tf.layers.batch_normalization(conv1_pool)
-
-      # 3, 4
-      with tf.name_scope('conv2'):
-        conv2 = tf.nn.conv2d(conv1_bn, conv2_filter, strides=[1,1,1,1], padding='SAME')
-        conv2 = tf.nn.relu(conv2)
-        conv2_pool = tf.nn.max_pool(conv2, ksize=[1,2,2,1], strides=[1,2,2,1], padding='SAME')    
-        conv2_bn = tf.layers.batch_normalization(conv2_pool)
-
-      # 5, 6
-      with tf.name_scope('conv3'):
-        conv3 = tf.nn.conv2d(conv2_bn, conv3_filter, strides=[1,1,1,1], padding='SAME')
-        conv3 = tf.nn.relu(conv3)
-        conv3_pool = tf.nn.max_pool(conv3, ksize=[1,2,2,1], strides=[1,2,2,1], padding='SAME')  
-        conv3_bn = tf.layers.batch_normalization(conv3_pool)
-
-      # 7, 8
-      with tf.name_scope('conv4'):
-        conv4 = tf.nn.conv2d(conv3_bn, conv4_filter, strides=[1,1,1,1], padding='SAME')
-        conv4 = tf.nn.relu(conv4)
-        conv4_pool = tf.nn.max_pool(conv4, ksize=[1,2,2,1], strides=[1,2,2,1], padding='SAME')
-        conv4_bn = tf.layers.batch_normalization(conv4_pool)
-
-      # 9
-      with tf.name_scope('flat'):
-        #flat = tf.contrib.layers.flatten(conv4_bn) 
-        #flat = tf.reshape(conv4_bn, shape=[None, -1])
-        #print(conv4_bn.get_shape().as_list())
-        flat = flatten(conv4_bn) 
-
-      # 10
-      with tf.name_scope('fc1'):
-        full1 = nn_layer(flat, n_neurons=128, name='fc1', activation=tf.nn.relu)
-        #full1 = tf.nn.dropout(full1, keep_prob)
-        full1 = tf.layers.batch_normalization(full1)
-
-      # 11
-      with tf.name_scope('fc2'):
-        full2 = nn_layer(full1, n_neurons=256, name='fc2', activation=tf.nn.relu)
-        #full2 = tf.nn.dropout(full2, keep_prob)
-        full2 = tf.layers.batch_normalization(full2)
-
-      # 12
-      with tf.name_scope('fc3'):
-        full3 = nn_layer(full2, n_neurons=512, name='fc3', activation=tf.nn.relu)
-        #full3 = tf.nn.dropout(full3, keep_prob)
-        full3 = tf.layers.batch_normalization(full3)    
-
-      # 13
-
-      full4 = nn_layer(full3, n_neurons=1024, name='fc4', activation=tf.nn.relu)
-      #full4 = tf.nn.dropout(full4, keep_prob)
-      full4 = tf.layers.batch_normalization(full4)        
-
-      # 14
-
-      logits = nn_layer(full3, n_neurons=10, name='logits')
-    return X, y, logits
-
-
-
-def cnn_cifar10_model_XXX(graph):
-  # test
-  with graph.as_default():
-    with tf.name_scope('Inputs'):
-      with tf.name_scope('X'):
-        X = tf.placeholder(DTYPE, shape=(None, 3072), name='X')
-        X_reshaped = tf.reshape(X, shape=[-1, 32, 32, 3], name='X_reshaped')
-      with tf.name_scope('y'):
-        y = tf.placeholder(tf.int64, shape=(None), name='y')
-
-    with tf.device(_gpu_device_name(0)):
-      with tf.name_scope('conv1'):
-        kernel = _variable_with_weight_decay( name='kernel1',
-                            shape=[5, 5, 3, 64],
-                            stddev=5e-2,
-                            wd=None)
-        conv = tf.nn.conv2d(input=X_reshaped,
-                  filter=kernel,
-                  strides=[1, 1, 1, 1],
-                  padding='SAME')
-        biases = tf.get_variable(name='biases1', shape=[64], initializer=tf.constant_initializer(0.0))
-        pre_activation = tf.nn.bias_add(conv, biases)
-        conv1 = tf.nn.relu(pre_activation)
-
-      with tf.name_scope('pool1'):
-
-        pool1 = tf.nn.max_pool( conv1, 
-                    ksize=[1, 3, 3, 1],
-                    strides=[1, 2, 2, 1],
-                    padding='SAME',
-                    name='pool1')
-
-      with tf.name_scope('norm1'):
-        norm1 = tf.nn.lrn(  pool1, 
-                  4, 
-                  bias=1.0, 
-                  alpha=0.001 / 9.0, 
-                  beta=0.75,
-                  name='norm1')
-
-      with tf.name_scope('conv2'):
-        kernel = _variable_with_weight_decay( 'kernel2',
-                            shape=[5, 5, 64, 64],
-                            stddev=5e-2,
-                            wd=None)
-        conv = tf.nn.conv2d(input=norm1,
-                  filter=kernel,
-                  strides=[1, 1, 1, 1],
-                  padding='SAME')
-        biases = tf.get_variable(name='biases2', shape=[64], initializer=tf.constant_initializer(0.1))
-        pre_activation = tf.nn.bias_add(conv, biases)
-        conv2 = tf.nn.relu(pre_activation)
-
-      with tf.name_scope('norm2'):
-        norm2 = tf.nn.lrn(  conv2, 
-                  4, 
-                  bias=1.0, 
-                  alpha=0.001 / 9.0, 
-                  beta=0.75,
-                  name='norm2')
-
-      with tf.name_scope('pool2'):
-        pool2 = tf.nn.max_pool( norm2, 
-                    ksize=[1, 3, 3, 1],
-                    strides=[1, 2, 2, 1],
-                    padding='SAME',
-                    name='pool2')
-      
-
-
-      with tf.name_scope('fully_connected1'):
-        #print(pool2.get_shape().as_list())
-        shape = pool2.get_shape().as_list()[1:]
-        len_ = int(np.prod(np.array(shape)))
-        #print(type(np.prod(np.array(shape))))
-        #new_shape = [-1] + list(np.prod(np.array(pool2.get_shape().as_list()[1:])))
-
-        reshaped = tf.reshape(pool2, shape=[-1, len_])
-        #print(reshaped.get_shape().as_list())
-        fc1 = nn_layer(reshaped, 384, 'fully_connected1', tf.nn.relu)
-
-      #keep_prob = tf.placeholder(DTYPE, name='keep_prob')
-      #with tf.name_scope('dropout1'):
-        #fc1_dropout = tf.nn.dropout(fc1, keep_prob)
-
-      with tf.name_scope('fully_connected2'):
-        fc2 = nn_layer(fc1, 192, 'fully_connected2', tf.nn.relu)
-
-      #with tf.name_scope('dropout2'):
-        #fc2_dropout = tf.nn.dropout(fc2, keep_prob)
-
-      with tf.name_scope('logits'):
-        logits = nn_layer(fc2, 10, 'logits')
-
-  return X, y, logits

@@ -6,11 +6,15 @@ import tensorflow as tf
 
 from simulator.exceptions import InvalidDatasetTypeError
 
+FNAME_PREFIX = 'summary_'
+FNAME_SUFFIX = '.log'
+
 class Summary:
   """Helper class for storing training log."""
-  def __init__(self, name, optimizers, simulation_num):
+  def __init__(self, name, optimizers, n_params, simulation_num):
     self._n_replicas = len(optimizers.keys())
     self._name = name
+    self._n_params = n_params
     dirname = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
     dirname = os.path.join(dirname, 'summaries')
     if not os.path.exists(dirname):
@@ -18,7 +22,9 @@ class Summary:
     self._dirname = os.path.join(dirname, name)
     if not os.path.exists(self._dirname):
       os.makedirs(self._dirname)
-    filename = 'summary_' + str(simulation_num) + '.log'
+
+    filename = self._create_log_fname(simulation_num=simulation_num)
+    #filename = FNAME_PREFIX + str(simulation_num) + '.log'
     self._logfile_name = os.path.join(self._dirname, filename)
     
 
@@ -139,7 +145,8 @@ class Summary:
         'grad_norms': self._grads_vals,
         'weight_norms': self._weight_norm_vals,
         'accepts': self._replica_accepts,
-        'latest_epoch': self._epoch
+        'latest_epoch': self._epoch,
+        'n_params': self._n_params
     }
     if 'win' in sys.platform:
       with open(self._logfile_name, 'wb') as fo:
@@ -152,3 +159,17 @@ class Summary:
   def get_dirname(self):
     """Returns a full path to the directory where the log is stored."""
     return self._dirname
+
+  def _create_log_fname(self, simulation_num):
+
+    fname = FNAME_PREFIX + str(simulation_num) + FNAME_SUFFIX
+    files = [f for f in os.listdir(self.get_dirname()) if FNAME_PREFIX in f]
+    if fname not in files:
+      return fname
+    else:
+      files.sort(key=lambda x: int(x.split('_')[1].split('.')[0]))
+
+    last_file = files[-1]
+    last_sim_num = int(last_file.split('_')[1].split('.')[0])
+
+    return FNAME_PREFIX + str(last_sim_num + 1) + FNAME_SUFFIX

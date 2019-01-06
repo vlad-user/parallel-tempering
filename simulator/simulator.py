@@ -116,7 +116,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
                rmsprop_decay=0.9,
                rmsprop_momentum=0.001,
                rmsprop_epsilon=1e-6,
-               flush_every=30):
+               flush_every=60):
     """Creates a new simulator object.
 
     Args:
@@ -133,7 +133,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
       `batch_size`: Batch Size
       `n_epochs`: Number of epochs for each simulation
       `name`: The name of the simulation. Specifies the a folder name
-        through which a summary files can be later accessed.
+        from where a summary files can be later accessed.
       `n_simulatins`: Number of simulation to run.
       `test_step`: An integer specifing an interval of steps to perform until
         running a test dataset (1 step equals batch_size)
@@ -176,9 +176,9 @@ class Simulator: # pylint: disable=too-many-instance-attributes
         other `noise_types`.
       `flush_every`: An integer that defines an interval in seconds that
         currently accumulated training log will be flushed to disk.
-        Default is 30 seconds.
-
+        Default is 60 seconds.
     """
+
     self._model = model
     self._learning_rate = learning_rate
     self._noise_type = noise_type
@@ -204,9 +204,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
     self._test_batch = max(2000, batch_size)
     self._logged = False # if log has been written to disk 
     self._flush_every = flush_every
-    self._train_step = int(min(self._test_step, self._swap_step) / 2)
-
-
+    self._train_step = int(min(self._test_step, self._swap_step) / s_utils.TRAIN_FREQ)
 
   def train_n_times(self, train_data_size=None, **kwargs):
     """Trains `n_simulations` times using the same setup.
@@ -335,16 +333,22 @@ class Simulator: # pylint: disable=too-many-instance-attributes
       step = 0
 
       with tf.Session() as sess:
-
+        #_ = sess.run([iterator.initializer,
+        #              iter_valid.initializer,
+        #              iter_test.initializer,
+        #              g.variable_initializer])
+        
         sess.run(iterator.initializer)
         sess.run(iter_valid.initializer)
         sess.run(iter_test.initializer)
         sess.run(g.variable_initializer)
+
         next_batch = iterator.get_next()
         next_batch_test = iter_test.get_next()
         next_batch_valid = iter_valid.get_next()
-        for epoch in range(self._n_epochs):
 
+        for epoch in range(self._n_epochs):
+          #self._initialize_uninitialized(sess)
           while True:
             train_batch_loss = {i:[] for i in range(self._n_replicas)}
             train_batch_err = {i:[] for i in range(self._n_replicas)}
@@ -373,15 +377,15 @@ class Simulator: # pylint: disable=too-many-instance-attributes
                 if step > self._burn_in_period:
                   g.swap_replicas(evaluated)
 
-              ### train ###
+              ### train + swaps ###
               if step % self._train_step == 0 or step == 1:
-                include_diffusion = True
+                special_ops = True
               else:
-                include_diffusion = False
+                special_ops = False
 
               batch = sess.run(next_batch)
               feed_dict = g.create_feed_dict(batch['X'], batch['y'])
-              evaluated = sess.run(g.get_train_ops(include_diffusion=include_diffusion),
+              evaluated = sess.run(g.get_train_ops(special_ops=special_ops),
                                    feed_dict=feed_dict)
 
               loss = g.extract_evaluated_tensors(evaluated, 'loss')
@@ -396,7 +400,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
                   evaled.append(np.mean(train_batch_loss[i]))
                 for i in range(self._n_replicas):
                   evaled.append(np.mean(train_batch_err[i]))
-                evaled += g.extract_evaluated_tensors(evaluated, 'diffusion')
+                evaled += g.extract_evaluated_tensors(evaluated, 'special_vals')
                 g.add_summary(evaled+evaluated[-self._n_replicas:],
                               step=step,
                               epoch=epoch,
@@ -407,14 +411,13 @@ class Simulator: # pylint: disable=too-many-instance-attributes
               if time() - last_flush_time > self._flush_every:
                 g.flush_summary()
                 last_flush_time = time()
-            
+
             except tf.errors.OutOfRangeError:
               sess.run(iterator.initializer)
               break
 
     g._summary._latest_epoch = self._n_epochs
     g.flush_summary()
-
 
   def _train_epoch(self, sess, next_batch, iterator, dataset_type):
     """Trains the whole data in the iterator and returns average results."""
@@ -424,6 +427,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
     g = self._graph
 
     while True:
+      #self._initialize_uninitialized(sess)
       try:
         batch = sess.run(next_batch)
         feed_dict = g.create_feed_dict(batch['X'],
@@ -445,6 +449,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
         res = loss + err
         sess.run(iterator.initializer)
         break
+
     return res
 
 
@@ -460,7 +465,6 @@ class Simulator: # pylint: disable=too-many-instance-attributes
       `kwargs`: Should be following keyword arguments: `train_data`,
         `train_labels`, `test_data`, `test_labels`, `validation_data`,
         `validation_labels`.
-
     """
     self._graph = SimulatorGraph(self._model,
                                 self._learning_rate,
@@ -476,26 +480,38 @@ class Simulator: # pylint: disable=too-many-instance-attributes
 
     
 
-    if train_data_size is not None:
-      test_data = kwargs.get('test_data', None)
-      test_labels = kwargs.get('test_labels', None)
-      valid_data = kwargs.get('validation_data', None)
-      valid_labels = kwargs.get('validation_labels', None)
-      train_data = kwargs.get('train_data', None)
-      train_labels = kwargs.get('train_labels', None)
+    
+    test_data = kwargs.get('test_data', None)
+    test_labels = kwargs.get('test_labels', None)
+    valid_data = kwargs.get('validation_data', None)
+    valid_labels = kwargs.get('validation_labels', None)
+    train_data = kwargs.get('train_data', None)
+    train_labels = kwargs.get('train_labels', None)
+
+    if train_data_size is None:
       train_data, train_labels = sklearn.utils.shuffle(
           train_data, train_labels)
       train_data_ = train_data[:train_data_size]
       train_labels_ = train_labels[:train_data_size]
-      self._parallel_tempering_train(train_data=train_data_,
-                                     train_labels=train_labels_,
-                                     test_data=test_data,
-                                     test_labels=test_labels,
-                                     validation_data=valid_data,
-                                     validation_labels=valid_labels)
     else:
-      self._parallel_tempering_train(kwargs)
-
+      train_data_ = train_data
+      train_labels_ = train_labels
+    self._parallel_tempering_train(train_data=train_data_,
+                                   train_labels=train_labels_,
+                                   test_data=test_data,
+                                   test_labels=test_labels,
+                                   validation_data=valid_data,
+                                   validation_labels=valid_labels)
+  
+  def _initialize_uninitialized(self, sess):
+    with self._graph.get_tf_graph().as_default():
+      global_vars = tf.global_variables()
+      is_not_initialized = sess.run([tf.is_variable_initialized(v)
+                                     for v in global_vars])
+      not_initialized_vars = [v for (v, f) in zip(global_vars, is_not_initialized)
+                              if not f]
+      if len(not_initialized_vars):
+        sess.run(tf.variables_initializer(not_initialized_vars))
 
   def _log_params(self):
     """Creates and stores description file."""
@@ -517,7 +533,8 @@ class Simulator: # pylint: disable=too-many-instance-attributes
         'tuning_parameter_name':self._tuning_param_name,
         'description':self._description,
         'burn_in_period':self._burn_in_period,
-        'proba_coeff':self._proba_coeff
+        'proba_coeff':self._proba_coeff,
+        'n_params': int(self._graph._n_params)
     }
     with open(filepath, 'w') as file:
       json.dump(_log, file, indent=4)

@@ -110,7 +110,7 @@ def get_cifar10_data(validation_size=0.5, random_state=None):
                     if random_state is not None else random.randint(1, 42)))
   X_train = cif.train_data
   y_train = cif.train_labels
-  return X_train, y_train, X_test, y_test, X_valid, y_valid
+  return X_train/255, y_train, X_test/255, y_test, X_valid/255, y_valid
 
 def get_fashion_mnist_data(validation_size=0.1, random_state=None, flatten=True):
   """Returns fashion mnist dataset. If not on disk, downloads."""
