@@ -11,12 +11,11 @@ from simulator.simulator_utils import DTYPE
 NUMPY_DTYPE = (np.float64 if DTYPE == tf.float64 else np.float32)
 
 class Optimizer:
-  """Wrapper for tf.train.GradientDescentOptimizer"""
+  """Base wrapper for tensorflow optimizers."""
   def __init__(self, learning_rate, replica_id, noise_list=None, # pylint: disable=too-many-arguments
-               decay=None, momentum=None, epsilon=None, # pylint: disable=unused-argument
-               use_locking=None, centered=None): # pylint: disable=unused-argument
-    """decay, momentum, epsilon, use_locking, centered args are for
-      RMSPropOptimizer only."""
+               decay=None, momentum=None, epsilon=None,
+               use_locking=None, centered=None):
+    """decay, momentum, epsilon, use_locking, centered args are for RMSPropOptimizer only."""
     self._initializer(learning_rate, replica_id, noise_list)
 
 
@@ -96,6 +95,10 @@ class Optimizer:
 
     return variables
 
+  def set_train_route(self, route): # pylint: disable=unused-argument, no-self-use
+    """Should be overriden in subclasses if necessary."""
+    pass
+
 class NormalNoiseGDOptimizer(Optimizer):
   """Optimizer that adds random noise during training."""
   def __init__(self, learning_rate, replica_id, noise_list):
@@ -173,10 +176,6 @@ class GDOptimizer(Optimizer):
     super(GDOptimizer, self).__init__(
         learning_rate, replica_id, noise_list)
 
-  def set_train_route(self, route): # pylint: disable=unused-argument, no-self-use
-    """Doesn't do anything. Added for consistency with other optimizers."""
-    return
-
 class RMSPropOptimizer(Optimizer):
   """Wrapper for tf.train.RMSPropOptimizer."""
   def __init__( # pylint: disable=too-many-arguments
@@ -205,12 +204,72 @@ class RMSPropOptimizer(Optimizer):
   def minimize(self, loss):
     self.trainable_variables = self._get_dependencies(loss) # pylint: disable=attribute-defined-outside-init
     with tf.device(_gpu_device_name(self.replica_id)):
-      self.train_op = self.tf_optimizer.minimize(loss)
-    var_list = self._get_dependencies(loss)
-    grads_and_vars = self.tf_optimizer.compute_gradients(loss, var_list)
+      self.train_op = self.tf_optimizer.minimize(loss, self.trainable_variables)
+    
+    with tf.device(_gpu_device_name(self.replica_id)):
+      grads_and_vars = self.tf_optimizer.compute_gradients(loss, var_list)
     self._grads = [g for g, v in grads_and_vars]
     return self.train_op
 
   def set_train_route(self, route): # pylint: disable=unused-argument, no-self-use
     """Doesn't do anything. Added for consistency with other optimizers."""
     return
+
+#######################################################################################
+class GDOptimizer_v2:
+  """This is just for testing. Remove this later."""
+  def __init__(self, learning_rate, replica_id, noise_list):
+    self.learning_rate = learning_rate
+    self.replica_id = replica_id
+    self.trainable_variables = None
+    self.tf_optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learning_rate)
+
+  def minimize(self, loss):
+
+    var_list = self._get_dependencies(loss)
+    grads_and_vars = self.tf_optimizer.compute_gradients(loss, var_list)
+    train_op = self.tf_optimizer.apply_gradients(grads_and_vars)
+    #train_op = self.tf_optimizer.minimize(loss, var_list)
+
+    #grads_and_vars = self.compute_gradients(loss)
+    #train_op = self.apply_gradients(grads_and_vars)
+    self.train_op = train_op # pylint: disable=attribute-defined-outside-init
+    return train_op
+
+  def get_train_op(self,):
+    """Returns the current training op."""
+    if self.train_op is None:
+      raise ValueError('train_op is not set. Call minimize() to set.')
+    return self.train_op
+
+  def _get_dependencies(self, tensor):
+    """Returns all vars that `tensor` is dependent on."""
+    _dict = {v.op: v for v in tf.trainable_variables()}
+
+    start = tensor.op
+    queue = collections.deque()
+    queue.append(start)
+    visited = set([start])
+    variables = []
+    while queue:
+      op_ = queue.popleft()
+      if op_ in _dict:
+        variables.append(_dict[op_])
+      else:
+        for op_in in op_.inputs:
+          if op_in.op not in visited:
+            queue.append(op_in.op)
+            visited.add(op_in.op)
+
+    # trainable vars for calculation of displacement from original vals
+    if self.trainable_variables is None:
+      self.trainable_variables = variables # pylint: disable=attribute-defined-outside-init
+
+    return variables
+
+
+  def set_train_route(self, route): # pylint: disable=unused-argument, no-self-use
+    """Doesn't do anything. Added for consistency with other optimizers."""
+    pass
+
+

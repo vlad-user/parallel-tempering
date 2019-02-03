@@ -1,5 +1,8 @@
 """Module for duplicating tensorflow graphs connected to the same inputs.
 This is a modified version of tf.contrib.copy_graph
+
+**NOTE**: `tf.layers.batch_normalization` is not working properly after
+being copied. 
 """
 import sys
 from copy import deepcopy

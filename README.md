@@ -5,7 +5,7 @@ Parallel Tempering is a Monte-Carlo simulation method of sampling a physical sys
 ### Requirements
 
 * [Python >= 3.5](https://www.python.org/)
-* [TensorFlow >= 1.5](https://www.tensorflow.org/) - It is mostly written using this package.
+* [TensorFlow 1.9.0 or 1.12.0](https://www.tensorflow.org/).
 * [scikit-learn](https://scikit-learn.org/stable/) - Used for shuffling datasets.
 * [NumPy](http://www.numpy.org/)
 * [Scipy](https://scipy.org/)

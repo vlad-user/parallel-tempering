@@ -33,6 +33,7 @@ def generate_experiment_name(model_name=None,
                              do_swaps=True,
                              n_replicas=None,
                              beta_0=None,
+                             beta_n=None,
                              loss_func_name='crossentropy',
                              swap_step=None,
                              burn_in_period=None,
@@ -42,7 +43,7 @@ def generate_experiment_name(model_name=None,
                              batch_size=None,
                              proba_coeff=1.0,
                              train_data_size=True,
-                             version='v1'):
+                             version='v2'):
   
   """
   name:
@@ -60,7 +61,9 @@ def generate_experiment_name(model_name=None,
     <batch_size>
     <noise_type>
     <proba_coeff>
+    <beta_n>
     <version>
+    v2 == added <beta_n>
   """
 
 
@@ -83,10 +86,11 @@ def generate_experiment_name(model_name=None,
       or (n_epochs is None)
       or (batch_size is None)
       or (noise_type is None)
-      or (proba_coeff is None)):
+      or (proba_coeff is None)
+      or (beta_n is None)):
     raise InvalidExperimentValueError(nones)
 
-  name = model_name + '_' + dataset_name + '_'
+  name = model_name.replace('_', '') + '_' + dataset_name + '_'
   name = name + str(separation_ratio) + '_'
   name = name + str(train_data_size) + '_' + str(n_replicas) + '_'
   name = name + str(beta_0) + '_'
@@ -95,7 +99,7 @@ def generate_experiment_name(model_name=None,
   name = name + str(learning_rate) + '_' + str(n_epochs) + '_'
   name = name + str(batch_size) + '_'
   name = name + str(noise_type.replace('_', '')) + '_'
-  name = name + str(proba_coeff) + '_' + version
+  name = name + str(proba_coeff) + '_' + str(beta_n) + '_' + version
 
   return name
 

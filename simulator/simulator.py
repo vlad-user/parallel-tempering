@@ -4,6 +4,7 @@ import os
 import gc
 import json
 from time import time
+import math
 
 import tensorflow as tf
 import sklearn
@@ -105,11 +106,12 @@ class Simulator: # pylint: disable=too-many-instance-attributes
                burn_in_period,
                swap_step,
                separation_ratio,
+               ensembles=None,
                n_simulations=1,
                test_step=500,
                tuning_parameter_name=None,
                loss_func_name='cross_entropy',
-               verbose_loss='zero_one_loss',
+               verbose_loss='error',
                proba_coeff=1.0,
                description=None,
                test_batch = None,
@@ -154,7 +156,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
         only cross_entropy and STUN (stochastic tunneling) are
         supported.
       `verbose_loss`: A loss to print during training. Default is 0-1 loss.
-        Available losses are 'cross_entropy', 'zero_one_loss'.
+        Possible parameters are: 'loss', 'error'.
       `proba_coeff`: The coeffecient is used in calculation of probability
         of swaps. Specifically, we have
         P(accept_swap) = exp(proba_coeff*(beta_1-beta_2)(E_1-E_2))
@@ -198,13 +200,15 @@ class Simulator: # pylint: disable=too-many-instance-attributes
     self._separation_ratio = separation_ratio
     self._tuning_param_name = tuning_parameter_name
     self._description = description
+    self._ensembles = ensembles
     self.rmsprop_decay = rmsprop_decay
     self.rmsprop_momentum = rmsprop_momentum
     self.rmsprop_epsilon = rmsprop_epsilon
-    self._test_batch = max(2000, batch_size)
+    self._test_batch = max(500, batch_size)
     self._logged = False # if log has been written to disk 
     self._flush_every = flush_every
-    self._train_step = int(min(self._test_step, self._swap_step) / s_utils.TRAIN_FREQ)
+    self._train_step = self._swap_step / s_utils.TRAIN_FREQ
+
 
   def train_n_times(self, train_data_size=None, **kwargs):
     """Trains `n_simulations` times using the same setup.
@@ -238,7 +242,8 @@ class Simulator: # pylint: disable=too-many-instance-attributes
                                   self._learning_rate,
                                   self._noise_list,
                                   self._name,
-                                  self._noise_type,
+                                  ensembles=self._ensembles,
+                                  noise_type=self._noise_type,
                                   simulation_num=i,
                                   loss_func_name=self._loss_func_name,
                                   proba_coeff=self._proba_coeff,
@@ -272,6 +277,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
         `validation_labels`.
 
     """
+
     last_flush_time = time()
     
     if not self._logged:
@@ -304,7 +310,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
             'One of the arguments is None:',
             [x for x in kwargs.keys() if kwargs[x] is None])
 
-      # create iterator for train dataset
+      # iterators for train/test/validation
       with g.get_tf_graph().as_default(): # pylint: disable=not-context-manager
         data = tf.data.Dataset.from_tensor_slices({
             'X':train_data,
@@ -328,93 +334,118 @@ class Simulator: # pylint: disable=too-many-instance-attributes
     except: # pylint: disable=try-except-raise
       raise
 
-    with g.get_tf_graph().as_default(): # pylint: disable=not-context-manager
+    step = 0
 
-      step = 0
+    with tf.Session(graph=g.get_tf_graph()) as sess:
+      _ = sess.run([iterator.initializer,
+                    iter_valid.initializer,
+                    iter_test.initializer,
+                    g.variable_initializer])
 
-      with tf.Session() as sess:
-        #_ = sess.run([iterator.initializer,
-        #              iter_valid.initializer,
-        #              iter_test.initializer,
-        #              g.variable_initializer])
-        
-        sess.run(iterator.initializer)
-        sess.run(iter_valid.initializer)
-        sess.run(iter_test.initializer)
-        sess.run(g.variable_initializer)
+      next_batch = iterator.get_next()
+      next_batch_test = iter_test.get_next()
+      next_batch_valid = iter_valid.get_next()
 
-        next_batch = iterator.get_next()
-        next_batch_test = iter_test.get_next()
-        next_batch_valid = iter_valid.get_next()
+      train_batch_loss = {i:[] for i in range(self._n_replicas)}
+      train_batch_err = {i:[] for i in range(self._n_replicas)}
 
-        for epoch in range(self._n_epochs):
-          #self._initialize_uninitialized(sess)
-          while True:
-            train_batch_loss = {i:[] for i in range(self._n_replicas)}
-            train_batch_err = {i:[] for i in range(self._n_replicas)}
-            try:
-              step += 1
+      for epoch in range(self._n_epochs):
 
-              ### test ###
-              if step % self._test_step == 0 or step == 1:
-                evaluated = self._train_epoch(sess,
-                                              next_batch_test,
-                                              iter_test,
-                                              dataset_type='test')
-                g.add_summary(evaluated, step, dataset_type='test')
-                self.print_log(epoch,
-                               step,
-                               evaluated[self._n_replicas:],
-                               g.get_accept_ratio())
+        while True:
+          
+          try:
+            step += 1
 
-              ### validation + swaps ###
-              if step % self._swap_step == 0:
-                evaluated = self._train_epoch(sess,
-                                              next_batch_valid,
-                                              iter_valid,
-                                              dataset_type='validation')
-                g.add_summary(evaluated, step, dataset_type='validation')
-                if step > self._burn_in_period:
-                  g.swap_replicas(evaluated)
+            ### test ###
+            if step % self._test_step == 0 or step == 1:
+              evaluated = self._train_epoch(sess,
+                                            next_batch_test,
+                                            iter_test,
+                                            dataset_type='test')
+              g.add_summary(evaluated, step, dataset_type='test')
+              verbose_loss_vals = g.extract_evaluated_tensors(evaluated,
+                                                              self._verbose_loss)
+              self.print_log(epoch,
+                             step,
+                             verbose_loss_vals,
+                             g.get_accept_ratio())
 
-              ### train + swaps ###
-              if step % self._train_step == 0 or step == 1:
-                special_ops = True
-              else:
-                special_ops = False
+            ### validation + swaps ###
+            if step % self._swap_step == 0:
+              evaluated = self._train_epoch(sess,
+                                            next_batch_valid,
+                                            iter_valid,
+                                            dataset_type='validation')
+              g.add_summary(evaluated, step, dataset_type='validation')
+              if step > self._burn_in_period:
+                g.swap_replicas(evaluated)
 
-              batch = sess.run(next_batch)
+            ### train ###
+
+            if step % self._train_step == 0 or step == 1:
+              special_ops = True
+            else:
+              special_ops = False
+
+            batch = sess.run(next_batch)
+            if self._noise_type not in ['dropout', 'dropout_gd', 'dropout_rmsprop']:
               feed_dict = g.create_feed_dict(batch['X'], batch['y'])
               evaluated = sess.run(g.get_train_ops(special_ops=special_ops),
                                    feed_dict=feed_dict)
 
               loss = g.extract_evaluated_tensors(evaluated, 'loss')
               err = g.extract_evaluated_tensors(evaluated, 'error')
-              for i in range(self._n_replicas):
+              
+            else:
+              # If dropout than evaluate loss, error separately from
+              # evaluation of gradients because dropout will cause to
+              # underperform.
+              feed_dict = g.create_feed_dict(batch['X'], batch['y'], dataset_type='test')
+              ops = g.get_train_ops(dataset_type='test', special_ops=special_ops)
+              loss_err_evaled = sess.run(ops, feed_dict=feed_dict)
+              loss = g.extract_evaluated_tensors(loss_err_evaled, 'loss')
+              err = g.extract_evaluated_tensors(loss_err_evaled, 'error')
+
+              # compute and apply grads
+              feed_dict = g.create_feed_dict(batch['X'], batch['y'], dataset_type='train')
+              ops = g.get_train_ops(loss_err=False)
+              evaluated = sess.run(ops, feed_dict=feed_dict)
+              evaluated = loss_err_evaled + evaluated
+
+
+
+            for i in range(self._n_replicas):
                 train_batch_loss[i].append(loss[i])
                 train_batch_err[i].append(err[i])
 
-              if step % self._train_step == 0 or step == 1:
-                evaled = []
-                for i in range(self._n_replicas):
-                  evaled.append(np.mean(train_batch_loss[i]))
-                for i in range(self._n_replicas):
-                  evaled.append(np.mean(train_batch_err[i]))
-                evaled += g.extract_evaluated_tensors(evaluated, 'special_vals')
-                g.add_summary(evaled+evaluated[-self._n_replicas:],
-                              step=step,
-                              epoch=epoch,
-                              dataset_type='train')
-                train_batch_loss = {i:[] for i in range(self._n_replicas)}
-                train_batch_err = {i:[] for i in range(self._n_replicas)}
+            if step % self._train_step == 0 or step == 1:
+              evaled = [np.mean(train_batch_loss[i]) for i in range(self._n_replicas)]
+              evaled += [np.mean(train_batch_err[i]) for i in range(self._n_replicas)]
+              evaled += g.extract_evaluated_tensors(evaluated, 'special_vals')
 
-              if time() - last_flush_time > self._flush_every:
-                g.flush_summary()
-                last_flush_time = time()
+              g.add_summary(evaled+evaluated[-self._n_replicas:],
+                            step=step,
+                            epoch=epoch,
+                            dataset_type='train')
 
-            except tf.errors.OutOfRangeError:
-              sess.run(iterator.initializer)
-              break
+              del train_batch_loss
+              del train_batch_err
+
+              train_batch_loss = {i:[] for i in range(self._n_replicas)}
+              train_batch_err = {i:[] for i in range(self._n_replicas)}
+
+            if time() - last_flush_time > self._flush_every:
+              g.flush_summary()
+              last_flush_time = time()
+
+          except tf.errors.OutOfRangeError:
+            sess.run(iterator.initializer)
+            break
+
+    if not train_batch_loss[0]:
+      evaled = [np.mean(train_batch_loss[i]) for i in range(self._n_replicas)]
+      evaled += [np.mean(train_batch_err[i]) for i in range(self._n_replicas)]
+      g.add_summary(evaled, step=step, epoch=n_epochs, dataset_type='train')
 
     g._summary._latest_epoch = self._n_epochs
     g.flush_summary()
@@ -470,7 +501,8 @@ class Simulator: # pylint: disable=too-many-instance-attributes
                                 self._learning_rate,
                                 self._noise_list,
                                 self._name,
-                                self._noise_type,
+                                ensembles=self._ensembles,
+                                noise_type=self._noise_type,
                                 simulation_num=0,
                                 loss_func_name=self._loss_func_name,
                                 proba_coeff=self._proba_coeff,
@@ -488,7 +520,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
     train_data = kwargs.get('train_data', None)
     train_labels = kwargs.get('train_labels', None)
 
-    if train_data_size is None:
+    if train_data_size is not None:
       train_data, train_labels = sklearn.utils.shuffle(
           train_data, train_labels)
       train_data_ = train_data[:train_data_size]

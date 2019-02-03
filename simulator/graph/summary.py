@@ -5,16 +5,17 @@ import sys
 import tensorflow as tf
 
 from simulator.exceptions import InvalidDatasetTypeError
+from simulator.graph.device_placer import _gpu_device_name
+
 
 FNAME_PREFIX = 'summary_'
 FNAME_SUFFIX = '.log'
 
 class Summary:
   """Helper class for storing training log."""
-  def __init__(self, name, optimizers, n_params, simulation_num):
+  def __init__(self, name, optimizers, simulation_num):
     self._n_replicas = len(optimizers.keys())
     self._name = name
-    self._n_params = n_params
     dirname = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
     dirname = os.path.join(dirname, 'summaries')
     if not os.path.exists(dirname):
@@ -39,18 +40,13 @@ class Summary:
     self._valid_steps = []
     self._train_noise_vals = {i:[] for i in range(self._n_replicas)}
     self._diffusion_vals = {i:[] for i in range(self._n_replicas)}
-    self._grads_vals = {i:[] for i in range(self._n_replicas)}
-    self._weight_norm_vals = {i:[] for i in range(self._n_replicas)}
-
     self._replica_accepts = {i:[] for i in range(self._n_replicas)}
 
-    self._diffusion_ops, self._norm_ops = self._create_diffusion_ops(optimizers)
-
-    self._grad_norm_ops = self._create_gradient_ops(optimizers)
+    self._diffusion_ops = self._create_diffusion_ops(optimizers)
 
     self._epoch = 0
 
-  def _create_diffusion_ops(self, optimizers):
+  def _create_diffusion_ops_old(self, optimizers):
     """Creates ops for for diffused l2 distance in parameter space."""
     with tf.name_scope('diffusion'):
       curr_vars = {
@@ -58,7 +54,7 @@ class Summary:
               for i in range(self._n_replicas)
       }
       init_vars = {
-          i:[tf.Variable(v.initialized_value()) for v in curr_vars[i]]
+          i:[tf.Variable(v.initialized_value(), trainable=False) for v in curr_vars[i]]
               for i in range(self._n_replicas)
       }
       curr_vars_reshaped = {
@@ -85,7 +81,37 @@ class Summary:
           i:tf.norm(curr_vars_concat[i])
               for i in range(self._n_replicas)
       }
-    return _diffusion_ops, _norm_ops
+    return _diffusion_ops
+
+  def _create_diffusion_ops(self, optimizers):
+    """Creates ops for for diffused l2 distance in parameter space."""
+    curr_vars = {}
+    init_vars = {}
+    curr_vars_reshaped = {}
+    init_vars_reshaped = {}
+    curr_vars_concat = {}
+    init_vars_concat = {}
+    _diffusion_ops = {}
+
+    with tf.name_scope('diffusion'):
+      for i in range(self._n_replicas):
+        with tf.device(_gpu_device_name(i)):
+          curr_vars[i] = sorted(optimizers[i].trainable_variables,
+                                key=lambda x: x.name)
+          init_vars[i] = [tf.Variable(v.initialized_value(), trainable=False)
+                          for v in curr_vars[i]]
+
+          curr_vars_reshaped[i] = [tf.reshape(v, [-1]) for v in curr_vars[i]]
+
+          init_vars_reshaped[i] = [tf.reshape(v, [-1]) for v in init_vars[i]]
+
+          curr_vars_concat[i] = tf.concat(curr_vars_reshaped[i], axis=0)
+          init_vars_concat[i] = tf.concat(init_vars_reshaped[i], axis=0)
+
+          _diffusion_ops[i] = tf.norm(curr_vars_concat[i] - init_vars_concat[i])
+
+    return _diffusion_ops
+
 
   def _create_gradient_ops(self, optimizers):
     with tf.name_scope('gradient_norms'):
@@ -142,12 +168,10 @@ class Summary:
         'validation_steps': self._valid_steps,
         'noise_values': self._train_noise_vals,
         'diffusion': self._diffusion_vals,
-        'grad_norms': self._grads_vals,
-        'weight_norms': self._weight_norm_vals,
         'accepts': self._replica_accepts,
         'latest_epoch': self._epoch,
-        'n_params': self._n_params
     }
+
     if 'win' in sys.platform:
       with open(self._logfile_name, 'wb') as fo:
         pickle.dump(log_data, fo, protocol=pickle.HIGHEST_PROTOCOL)

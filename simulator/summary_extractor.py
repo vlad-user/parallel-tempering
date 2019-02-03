@@ -2,10 +2,12 @@ import os
 import sys
 import pickle
 import json
+import random
 
 import numpy as np
 import matplotlib.pyplot as plt
 import pylatex as tex
+from cycler import cycler
 
 from simulator.plot import Plot
 import simulator.simulator_utils as s_utils
@@ -614,10 +616,15 @@ class SummaryReportGenerator:
               'gold',
               'rosybrown',
               'tomato']
-  def __init__(self, names, labels, simulation_num=0, report_name='summary_report'):
+  _colors += _colors
+  def __init__(self, names, labels, simulation_num=0, report_name='summary_report', sample_every=1,
+               lower=500, higher=700):
     self._simulation_num = simulation_num
     self._summ_ext = {f:SummaryExtractor(f) for f in names}
+    self._original_names = []
     for i, name in enumerate(names):
+      self._original_names.append(self._summ_ext[name]._name)
+      self._summ_ext[name]._original_name = self._summ_ext[name]._name
       self._summ_ext[name]._name = labels[i]
     dirname = os.path.abspath(os.path.dirname(__file__))
     dirname = os.path.join(dirname, 'summaries', 'reports')
@@ -627,75 +634,124 @@ class SummaryReportGenerator:
     self._dirname = os.path.join(dirname, report_name)
     self._images_dirname = os.path.join(self._dirname, 'images')
     self._pdf_filename = os.path.join(self._dirname, report_name)
-
+    self._sample_every = sample_every
     if not os.path.exists(self._images_dirname):
       os.makedirs(self._images_dirname)
 
     self._width = r'1\textwidth'
     self._position = 'ht'
+    self.yaxis_cycle = cycler(y=[0.66, 0.67, 0.68, 0.69, 0.7, 0.71, 0.72])
+    self.lower = lower
+    self.higher = higher
 
-  def generate_report(self, custom_test=None):
+  def generate_report(self, custom_text="Results"):
     """Generates pdf file with report for for multiple individual simulations.
 
     Args:
       `custom_text`: A text that will be added to the beginning of the
         pdf file.
     """
-    doc = tex.Document(self._pdf_filename)
-    doc.append("""Results
-        
-
-        """)
+    doc = tex.Document(self._pdf_filename,
+                       font_size='tiny')
+    doc.append(custom_text)
+    doc.append(tex.LineBreak())
 
     self._create_specs_table(doc)
 
     with doc.create(tex.Figure(position=self._position)) as plot_:
-      plot_.add_image(self._plot_train_test_min_error())
+      plot_.add_image(self._plot_train_test_min_error(self._sample_every,
+                                                      self._simulation_num))
       plot_.add_caption('Train-test min error')
     plt.close()
 
     with doc.create(tex.Figure(position=self._position)) as plot_:
-      plot_.add_image(self._plot_train_test_min_loss())
+      plot_.add_image(self._plot_train_test_min_error_with_markers(self._sample_every,
+                                                                   self._simulation_num,
+                                                                   lower=self.lower,
+                                                                   higher=self.higher))
+      plot_.add_caption('Train-test min error with swap markers')
+    plt.close()
+
+    with doc.create(tex.Figure(position=self._position)) as plot_:
+      plot_.add_image(self._plot_train_test_min_loss(self._sample_every,
+                                                     self._simulation_num))
       plot_.add_caption('Train-test min loss')
     plt.close()
 
     with doc.create(tex.Figure(position=self._position)) as plot_:
-      plot_.add_image(self._plot_train_test_error())
-      plot_.add_caption('Train-test error (everything together)')
-    plt.close()
-
-    with doc.create(tex.Figure(position=self._position)) as plot_:
-      plot_.add_image(self._plot_train_test_loss())
-      plot_.add_caption('Train-test loss (everything together)')
+      plot_.add_image(self._plot_train_test_min_loss_with_markers(self._sample_every,
+                                                                  self._simulation_num,
+                                                                  lower=self.lower,
+                                                                  higher=self.higher))
+      plot_.add_caption('Train-test min loss with swap markers')
     plt.close()
 
     for name, se in self._summ_ext.items():
       with doc.create(tex.Figure(position=self._position)) as plot_:
-        plot_.add_image(self._plot_train_test_error_per_sim(se))
+        plot_.add_image(self._plot_train_test_error_per_sim(se,
+                                                            self._sample_every,
+                                                            self._simulation_num))
         plot_.add_caption('Train-test error for ' + se.get_name())
       plt.close()
 
     for name, se in self._summ_ext.items():
       with doc.create(tex.Figure(position=self._position)) as plot_:
-        plot_.add_image(self._plot_train_test_loss_per_sim(se))
+        plot_.add_image(self._plot_train_test_loss_per_sim(se,
+                                                           self._sample_every,
+                                                           self._simulation_num))
         plot_.add_caption('Train-test loss for ' + se.get_name())
       plt.close()
 
     for name, se in self._summ_ext.items():
       with doc.create(tex.Figure(position=self._position)) as plot_:
-        plot_.add_image(self._plot_mixing(se))
+        plot_.add_image(self._plot_mixing(se, self._simulation_num))
         plot_.add_caption('Mixing ' + se.get_name())
       plt.close()
 
     for name, se in self._summ_ext.items():
       with doc.create(tex.Figure(position=self._position)) as plot_:
-        plot_.add_image(self._plot_diffusion(se))
+        plot_.add_image(self._plot_diffusion(se, self._simulation_num))
         plot_.add_caption('Diffusion ' + se.get_name())
       plt.close()
 
+    with doc.create(tex.Figure(position=self._position)) as plot_:
+      plot_.add_image(self._plot_train_test_error(self._sample_every,
+                                                  self._simulation_num))
+      plot_.add_caption('Train-test error (everything together)')
+    plt.close()
+
+    with doc.create(tex.Figure(position=self._position)) as plot_:
+      plot_.add_image(self._plot_train_test_loss(self._sample_every,
+                                                 self._simulation_num))
+      plot_.add_caption('Train-test loss (everything together)')
+    plt.close()
+
     doc.generate_pdf(clean_tex=True)
 
-  def _plot_train_test_error(self, sample_every=4, simulation_num=0):
+
+
+  def generate_min_loss_err_report(self, simulation_nums, custom_text='Results'):
+    doc = doc = tex.Document(self._pdf_filename,
+                       font_size='tiny')
+    doc.append(custom_text)
+    doc.append(tex.LineBreak())
+
+    self._create_specs_table(doc)
+    for s in simulation_nums:
+      with doc.create(tex.Figure(position=self._position)) as plot_:
+        plot_.add_image(self._plot_train_test_min_error(self._sample_every,
+                                                        simulation_num=s))
+        plot_.add_caption('Train-test min error ' + str(s))
+      plt.close()
+
+      with doc.create(tex.Figure(position=self._position)) as plot_:
+        plot_.add_image(self._plot_train_test_min_loss(self._sample_every,
+                                                       simulation_num=s))
+        plot_.add_caption('Train-test min loss ' + str(s))
+      plt.close()
+    doc.generate_pdf(clean_tex=True)
+
+  def _plot_train_test_error(self, sample_every=1, simulation_num=0):
     fig, ax = plt.subplots()
     plot = Plot()
 
@@ -741,7 +797,7 @@ class SummaryReportGenerator:
                   linestyle=linestyle_test,
                   splined_points_mult=None)
 
-        y1 = [(a + b) / 2 for a, b in zip(y1[::2], y1[1::2])]
+        #y1 = [(a + b) / 2 for a, b in zip(y1[::2], y1[1::2])]
         y1 = y1[::sample_every]
         
 
@@ -763,7 +819,97 @@ class SummaryReportGenerator:
     plt.savefig(img_path, bbox_inches='tight')
     return img_path
 
-  def _plot_train_test_min_error(self, sample_every=4, simulation_num=0):
+  def _plot_train_test_min_error_with_markers(self, sample_every=1, simulation_num=0, lower=500, higher=700):
+    
+    def _get_next_yloc():
+      for y in self.yaxis_cycle*10000:
+        yield y['y']
+    fig, ax = plt.subplots()
+    plot = Plot()
+    color_idx = 0
+    added_noise_keys = None
+    for name in self._summ_ext:
+      se = self._summ_ext[name]
+      sep, loss_val, loss_err = se.get_sep_ratio_vs_min_error()
+      min_rid = se._vals['replica_id_min_err_sim_' + str(simulation_num)]
+      x, y = se.get_summary(summ_name='test_error',
+                            replica_id=min_rid,
+                            simulation_num=simulation_num)
+      x1, y1 = se.get_summary(summ_name='train_error',
+                              replica_id=min_rid,
+                              simulation_num=simulation_num)
+      n_epochs = se._summaries[simulation_num]['latest_epoch'] + 1
+      prev_x = x.copy()
+      prev_x1 = x1.copy()
+      x = [x[i] for i in range(len(y)) if lower <= prev_x[i] <= higher]
+      y = [y[i] for i in range(len(y)) if lower <= prev_x[i] <= higher]
+
+      x1 = [x1[i] for i in range(len(y1)) if lower <= prev_x1[i] <= higher]
+      y1 = [y1[i] for i in range(len(y1)) if lower <= prev_x1[i] <= higher]
+      n_epochs = higher - lower
+      if se.get_description()['n_replicas'] == 1:
+        label_test = se.get_name() + '_test_' + str(min_rid) + '_min:' + "{0:.3f}".format(min(y))
+        label_train = se.get_name() + '_train_' + str(min_rid) + '_min:' + "{0:.3f}".format(min(y1))
+        color = 'black'
+        linestyle_test = '-'
+        linestyle_train = '--'
+        linewidth_train = 2
+        linewidth_test = 2
+      else:
+        label_test = se.get_name() + '_test_' + str(min_rid) + '_min:' + "{0:.3f}".format(min(y))
+        label_train = se.get_name() + '_train_' + str(min_rid) + '_min:' + "{0:.3f}".format(min(y1))
+        color = self._colors[color_idx]
+        linestyle_test = '-'
+        linestyle_train = '--'
+        linewidth_train = 1.5
+        linewidth_test = 1.5
+        color_idx += 1
+
+      plot.plot(x,
+                y,
+                fig=fig,
+                ax=ax,
+                label=label_test,
+                linewidth=linewidth_test,
+                color=color,
+                linestyle=linestyle_test,
+                splined_points_mult=None)
+
+      plot.plot(x1,
+                y1,
+                fig=fig,
+                ax=ax,
+                label=label_train,
+                linewidth=linewidth_train,
+                linestyle=linestyle_train,
+                color=color,
+                splined_points_mult=None)
+      x, noise_vals = se.get_summary('noise_values', replica_id=min_rid, simulation_num=simulation_num)
+      noises = sorted(list(set(noise_vals)))
+      noises = [(n, i) for i, n in enumerate(noises)]
+      noise_keys = {n:i for n, i in noises}
+      next_yloc = _get_next_yloc()
+      for i, noise in enumerate(noise_vals):
+
+        if i > 0 and lower <= x[i] <= higher and noise != noise_vals[i-1]:
+          ax.axvline(x[i])
+          ax.text(x[i-1], next_yloc.__next__(), str(noise_keys[noise_vals[i-1]]) + '->' + str(noise_keys[noise]))
+          added_noise_keys = noise_keys
+          
+    if added_noise_keys:
+      xlabel = 'EPOCHS\n' + json.dumps(added_noise_keys)
+    else:
+      xlabel = 'EPOCHS'
+    plot.legend(fig=fig,
+                ax=ax,
+                xlabel=xlabel,
+                ylabel='ERROR',)
+    img_path = os.path.join(self._images_dirname,
+                            'train_test_min_error_with_markers' + str(simulation_num) + '.png')
+    plt.savefig(img_path, bbox_inches='tight')
+    return img_path
+
+  def _plot_train_test_min_error(self, sample_every=1, simulation_num=0, avg_interval=250):
     fig, ax = plt.subplots()
     plot = Plot()
     color_idx = 0
@@ -771,13 +917,12 @@ class SummaryReportGenerator:
       se = self._summ_ext[name]
       sep, loss_val, loss_err = se.get_sep_ratio_vs_min_error()
       min_rid = se._vals['replica_id_min_err_sim_' + str(simulation_num)]
-
       x, y = se.get_summary(summ_name='test_error',
                             replica_id=min_rid,
-                            simulation_num=self._simulation_num)
+                            simulation_num=simulation_num)
       x1, y1 = se.get_summary(summ_name='train_error',
                               replica_id=min_rid,
-                              simulation_num=self._simulation_num)
+                              simulation_num=simulation_num)
       n_epochs = se._summaries[simulation_num]['latest_epoch'] + 1
 
       if se.get_description()['n_replicas'] == 1:
@@ -797,7 +942,10 @@ class SummaryReportGenerator:
         linewidth_train = 1.5
         linewidth_test = 1.5
         color_idx += 1
-      
+      #y_vals = y[5:].copy()
+      #chunkified = [(np.mean(s), int((idx + 1)*avg_interval/2)) 
+      #              for idx, s in enumerate(y_vals[i:i+avg_interval] for i in range(0, len(y_vals), avg_interval))]
+      #annots = [("{0:.3f}".format(c[0]), x[_find_nearest_idx(x, c[1])], )]
       plot.plot(x,
                 y,
                 fig=fig,
@@ -826,11 +974,12 @@ class SummaryReportGenerator:
                 ax=ax,
                 xlabel='EPOCHS',
                 ylabel='ERROR',)
-    img_path = os.path.join(self._images_dirname, 'train_test_min_error.png')
+    img_path = os.path.join(self._images_dirname,
+                            'train_test_min_error' + str(simulation_num) + '.png')
     plt.savefig(img_path, bbox_inches='tight')
     return img_path
 
-  def _plot_train_test_min_loss(self, sample_every=4, simulation_num=0):
+  def _plot_train_test_min_loss(self, sample_every=1, simulation_num=0):
     fig, ax = plt.subplots()
     plot = Plot()
     color_idx = 0
@@ -841,10 +990,10 @@ class SummaryReportGenerator:
 
       x, y = se.get_summary(summ_name='test_loss',
                             replica_id=min_rid,
-                            simulation_num=self._simulation_num)
+                            simulation_num=simulation_num)
       x1, y1 = se.get_summary(summ_name='train_loss',
                               replica_id=min_rid,
-                              simulation_num=self._simulation_num)
+                              simulation_num=simulation_num)
       n_epochs = se._summaries[simulation_num]['latest_epoch'] + 1
 
       if se.get_description()['n_replicas'] == 1:
@@ -892,12 +1041,120 @@ class SummaryReportGenerator:
     plot.legend(fig=fig,
                 ax=ax,
                 xlabel='EPOCHS',
-                ylabel='ERROR',)
-    img_path = os.path.join(self._images_dirname, 'train_test_min_loss.png')
+                ylabel='LOSS',)
+    img_path = os.path.join(self._images_dirname,
+                            'train_test_min_loss' + str(simulation_num) + '.png')
     plt.savefig(img_path, bbox_inches='tight')
     return img_path
 
-  def _plot_train_test_loss(self, sample_every=4, simulation_num=0):
+  def _plot_train_test_min_loss_with_markers(self, sample_every=1, simulation_num=0, lower=500, higher=700):
+    #yaxis_cycle = cycler(y=[0.66, 0.68, 0.7, 0.72, 0.7, 0.68])
+    def _get_next_yloc():
+      for y in self.yaxis_cycle*10000:
+        yield y['y']
+    fig, ax = plt.subplots()
+    plot = Plot()
+    color_idx = 0
+    added_noise_keys = None
+    for name in self._summ_ext:
+      se = self._summ_ext[name]
+      sep, loss_val, loss_err = se.get_sep_ratio_vs_min_error()
+      min_rid = se._vals['replica_id_min_err_sim_' + str(simulation_num)]
+      x, y = se.get_summary(summ_name='test_loss',
+                            replica_id=min_rid,
+                            simulation_num=simulation_num)
+      x1, y1 = se.get_summary(summ_name='train_loss',
+                              replica_id=min_rid,
+                              simulation_num=simulation_num)
+      n_epochs = se._summaries[simulation_num]['latest_epoch'] + 1
+      prev_x = x.copy()
+      prev_x1 = x1.copy()
+      x = [x[i] for i in range(len(y)) if lower <= prev_x[i] <= higher]
+      y = [y[i] for i in range(len(y)) if lower <= prev_x[i] <= higher]
+
+      x1 = [x1[i] for i in range(len(y1)) if lower <= prev_x1[i] <= higher]
+      y1 = [y1[i] for i in range(len(y1)) if lower <= prev_x1[i] <= higher]
+      n_epochs = higher - lower
+      if se.get_description()['n_replicas'] == 1:
+        label_test = se.get_name() + '_test_' + str(min_rid) + '_min:' + "{0:.3f}".format(min(y))
+        label_train = se.get_name() + '_train_' + str(min_rid) + '_min:' + "{0:.3f}".format(min(y1))
+        color = 'black'
+        linestyle_test = '-'
+        linestyle_train = '--'
+        linewidth_train = 2
+        linewidth_test = 2
+      else:
+        label_test = se.get_name() + '_test_' + str(min_rid) + '_min:' + "{0:.3f}".format(min(y))
+        label_train = se.get_name() + '_train_' + str(min_rid) + '_min:' + "{0:.3f}".format(min(y1))
+        color = self._colors[color_idx]
+        linestyle_test = '-'
+        linestyle_train = '--'
+        linewidth_train = 1.5
+        linewidth_test = 1.5
+        color_idx += 1
+
+      plot.plot(x,
+                y,
+                fig=fig,
+                ax=ax,
+                label=label_test,
+                linewidth=linewidth_test,
+                color=color,
+                linestyle=linestyle_test,
+                splined_points_mult=None)
+
+      plot.plot(x1,
+                y1,
+                fig=fig,
+                ax=ax,
+                label=label_train,
+                linewidth=linewidth_train,
+                linestyle=linestyle_train,
+                color=color,
+                splined_points_mult=None)
+      x, noise_vals = se.get_summary('noise_values', replica_id=min_rid, simulation_num=simulation_num)
+      noises = sorted(list(set(noise_vals)))
+      noises = [(n, i) for i, n in enumerate(noises)]
+      noise_keys = {n:i for n, i in noises}
+      next_yloc = _get_next_yloc()
+      text_loc = max(y)//2
+      for i, noise in enumerate(noise_vals):
+
+        if i > 0 and lower <= x[i] <= higher and noise != noise_vals[i-1]:
+          ax.axvline(x[i])
+          ax.text(x[i-1], text_loc + next_yloc.__next__()*5, str(noise_keys[noise_vals[i-1]]) + '->' + str(noise_keys[noise]))
+          added_noise_keys = noise_keys
+          
+    if added_noise_keys:
+      xlabel = 'EPOCHS\n' + json.dumps(added_noise_keys)
+    else:
+      xlabel = 'EPOCHS'
+    plot.legend(fig=fig,
+                ax=ax,
+                xlabel=xlabel,
+                ylabel='ERROR',)
+    img_path = os.path.join(self._images_dirname,
+                            'train_test_min_loss_with_markers' + str(simulation_num) + '.png')
+    plt.savefig(img_path, bbox_inches='tight')
+    return img_path
+
+  def _plot_loss(self, summ_name, sample_every=1, simulation_num=0):
+    fig, ax = plt.subplots()
+    plot = Plot()
+
+    color_idx = 0
+    for name in self._summ_ext:
+      se = self._summ_ext[name]
+      for r in range(se.get_description()['n_replicas']):
+        x, y = se.get_summary(summ_name=summ_name,
+                              replica_id=r,
+                              simulation_num=simulation_num)
+        if se.get_description()['n_replicas'] == 1:
+          color = 'black'
+        else:
+          color = self._colors[color_idx]
+
+  def _plot_train_test_loss(self, sample_every=1, simulation_num=0):
     fig, ax = plt.subplots()
     plot = Plot()
 
@@ -909,10 +1166,10 @@ class SummaryReportGenerator:
         
         x, y = se.get_summary(summ_name='test_loss',
                               replica_id=r,
-                              simulation_num=self._simulation_num)
+                              simulation_num=simulation_num)
         x1, y1 = se.get_summary(summ_name='train_loss',
                                 replica_id=r,
-                                simulation_num=self._simulation_num)
+                                simulation_num=simulation_num)
         n_epochs = se._summaries[simulation_num]['latest_epoch'] + 1
 
         if se.get_description()['n_replicas'] == 1:
@@ -965,7 +1222,7 @@ class SummaryReportGenerator:
     plt.savefig(img_path, bbox_inches='tight')
     return img_path
 
-  def _plot_train_test_error_per_sim(self, se, sample_every=4, simulation_num=0):
+  def _plot_train_test_error_per_sim(self, se, sample_every=1, simulation_num=0):
     fig, ax = plt.subplots()
     plot = Plot()
 
@@ -975,10 +1232,10 @@ class SummaryReportGenerator:
         
       x, y = se.get_summary(summ_name='test_error',
                             replica_id=r,
-                            simulation_num=self._simulation_num)
+                            simulation_num=simulation_num)
       x1, y1 = se.get_summary(summ_name='train_error',
                               replica_id=r,
-                              simulation_num=self._simulation_num)
+                              simulation_num=simulation_num)
       n_epochs = se._summaries[simulation_num]['latest_epoch'] + 1
 
       if se.get_description()['n_replicas'] == 1:
@@ -1033,7 +1290,7 @@ class SummaryReportGenerator:
     plt.savefig(img_path, bbox_inches='tight')
     return img_path
 
-  def _plot_train_test_loss_per_sim(self, se, sample_every=4, simulation_num=0):
+  def _plot_train_test_loss_per_sim(self, se, sample_every=1, simulation_num=0):
     fig, ax = plt.subplots()
     plot = Plot()
 
@@ -1043,10 +1300,10 @@ class SummaryReportGenerator:
         
       x, y = se.get_summary(summ_name='test_loss',
                             replica_id=r,
-                            simulation_num=self._simulation_num)
+                            simulation_num=simulation_num)
       x1, y1 = se.get_summary(summ_name='train_loss',
                               replica_id=r,
-                              simulation_num=self._simulation_num)
+                              simulation_num=simulation_num)
       n_epochs = se._summaries[simulation_num]['latest_epoch'] + 1
 
       if se.get_description()['n_replicas'] == 1:
@@ -1101,15 +1358,15 @@ class SummaryReportGenerator:
     plt.savefig(img_path, bbox_inches='tight')
     return img_path
 
-  def _plot_mixing(self, se):
-    fig = se._plot_mixing()
+  def _plot_mixing(self, se, simulation_num=0):
+    fig = se._plot_mixing(simulation_num)
 
     img_path = os.path.join(self._images_dirname, se.get_name() + 'mixing.png')
     plt.savefig(img_path, bbox_inches='tight')
     return img_path
 
-  def _plot_diffusion(self, se):
-    fig = se._plot_diffusion()
+  def _plot_diffusion(self, se, simulation_num=0):
+    fig = se._plot_diffusion(simulation_num)
 
     img_path = os.path.join(self._images_dirname, se.get_name() + 'diffusion.png')
     plt.savefig(img_path, bbox_inches='tight')
@@ -1117,13 +1374,28 @@ class SummaryReportGenerator:
 
   def _create_specs_table(self, doc):
     """Generates summary table."""
-    
+    #original_names = "\n".join(self._original_names)
+    for name in self._original_names:
+
+      doc.append(name)
+      doc.append(tex.LineBreak())
+      doc.append(str(self._summ_ext[name].get_description()['noise_list']))
+      doc.append(tex.LineBreak())
+    doc.append(tex.LineBreak())
+
     col_names = ['Name',
-                 'Accept Ratio',
-                 'Mixing Ratio',
-                 'Visit Ratio',
-                 'Min Test Err',
-                 'Burn In']
+                 'Accept',
+                 'Mixing',
+                 'Visit',
+                 'TestErr',
+                 'BurnIn',
+                 'Swap',
+                 'Sep',
+                 'Coeff',
+                 'DSize',
+                 'LR',
+                 'Batch',
+                 '#params']
 
     table_spec = "|@{}l@{}".join(['' for i in range(len(col_names) + 1)]) + '|'
 
@@ -1142,14 +1414,21 @@ class SummaryReportGenerator:
         se = self._summ_ext[summ_ext]
         desc = se.get_description()
         
-        vals_['Accept Ratio'].append("{0:.3f}".format(se.get_accept_ratio()))
-        vals_['Mixing Ratio'].append("{0:.3f}".format(se.get_mix_ratio()))
-        vals_['Visit Ratio'].append("{0:.3f}".format(se.get_visit_ratio()))
+        vals_['Accept'].append("{0:.3f}".format(se.get_accept_ratio()))
+        vals_['Mixing'].append("{0:.3f}".format(se.get_mix_ratio()))
+        vals_['Visit'].append("{0:.3f}".format(se.get_visit_ratio()))
         sep, err, std = se.get_sep_ratio_vs_min_error()
-        vals_['Min Test Err'].append("{0:.3f}".format(err))
-        vals_['Burn In'].append(str(desc['burn_in_period']))
+        vals_['TestErr'].append("{0:.3f}".format(err))
+        vals_['BurnIn'].append(str(desc['burn_in_period']))
         vals_['Name'].append(se.get_name())
-
+        vals_['Swap'].append(str(desc['swap_step']))
+        vals_['Sep'].append(desc['separation_ratio'])
+        vals_['Coeff'].append(desc['proba_coeff'])
+        vals_['LR'].append(desc['learning_rate'])
+        vals_['Batch'].append(desc['batch_size'])
+        train_data_size = s_utils.get_value_from_name(se._original_name, 'train_data_size')
+        vals_['DSize'].append(train_data_size)
+        vals_['#params'].append(desc['n_params'])
         for k in vals_:
           vals_[k] = list(set(vals_[k]))
         row = []
@@ -1428,10 +1707,11 @@ class SummaryExtractor:
                          sample_every=sample_every)
     _ = self._plot_diffusion(simulation_num=simulation_num)
     _ = self._plot_mixing(simulation_num=simulation_num)
+    '''
     _ = self._plot_grads(simulation_num=simulation_num,
                          sample_every=sample_every)
     _ = self._plot_norms(simulation_num=simulation_num)
-
+    '''
   def get_accept_ratio(self):
     accepts = []
     if self._vals['accept_ratio'] is None:
@@ -1577,14 +1857,14 @@ class SummaryExtractor:
       if summ_name == 'test_loss':
         x, y = self.get_summary('test_loss', r, simulation_num)
         plot.plot(x, y, fig=fig, ax=ax, label='test_replica_' + str(r),
-                  linewidth=2, color=self._colors[r])
+                  linewidth=1, color=self._colors[r])
       elif summ_name == 'train_loss':
         x1, y1 = self.get_summary('train_loss', r, simulation_num)
-        y1 = [(a + b) / 2 for a, b in zip(y1[::2], y1[1::2])]
+        #y1 = [(a + b) / 2 for a, b in zip(y1[::2], y1[1::2])]
         y1 = y1[::sample_every]
         x1 = np.linspace(start=0, stop=x1[-1], num=len(y1))
         plot.plot(x1, y1, fig=fig, ax=ax, label='train_replica ' + str(r),
-                  linewidth=2, linestyle='--', splined_points_mult=None,
+                  linewidth=1, linestyle='--', splined_points_mult=None,
                   color=self._colors[r])
 
     plot.legend(fig, ax, title=summ_name.upper().replace('_', ' '),
@@ -1598,14 +1878,14 @@ class SummaryExtractor:
       if summ_name == 'test_error':
         x, y = self.get_summary('test_error', r, simulation_num)
         plot.plot(x, y, fig=fig, ax=ax, label='test_replica_' + str(r),
-                  linewidth=2, color=self._colors[r])
+                  linewidth=1, color=self._colors[r])
       elif summ_name == 'train_error':
         x1, y1 = self.get_summary('train_error', r, simulation_num)
-        y1 = [(a + b) / 2 for a, b in zip(y1[::2], y1[1::2])]
+        #y1 = [(a + b) / 2 for a, b in zip(y1[::2], y1[1::2])]
         y1 = y1[::sample_every]
         x1 = np.linspace(start=0, stop=x1[-1], num=len(y1))
         plot.plot(x1, y1, fig=fig, ax=ax, label='train_replica ' + str(r),
-                  linewidth=2, linestyle='--', splined_points_mult=None,
+                  linewidth=1, linestyle='--', splined_points_mult=None,
                   color=self._colors[r])
 
     plot.legend(fig, ax, legend_title='ReplicaID',
@@ -1614,7 +1894,7 @@ class SummaryExtractor:
 
   def _plot_mixing(self, simulation_num=0):
     def _get_key(key):
-      keys = [float("{0:.4f}".format(b))
+      keys = [float("{0:.5f}".format(b))
               for b in self.get_description()['noise_list']]
       return keys[int(np.argmin([abs(k-key) for k in keys]))]
 
@@ -1629,8 +1909,9 @@ class SummaryExtractor:
       y_new = [key_map[_get_key(i)] for i in y]
       plot.plot(x, y_new, fig=fig, ax=ax, label='replica ' + str(r),
                 linewidth=2)
-    yticks_names = [float("{0:.4f}".format(b)) for b in noise_list]
-
+    yticks_names = [float("{0:.5f}".format(b)) for b in noise_list]
+    #print(yticks_names)
+    #print(noise_list)
     plt.gca().set_yticklabels(['0'] + yticks_names)
     plot.legend(fig, ax, legend_title='ReplicaID',
                 xlabel='EPOCHS', ylabel='NOISE LEVEL')
