@@ -3,11 +3,14 @@ import sys
 import pickle
 import json
 import random
+import operator
 
 import numpy as np
 import matplotlib.pyplot as plt
 import pylatex as tex
 from cycler import cycler
+from mpl_toolkits.mplot3d import Axes3D
+import matplotlib.ticker as plticker
 
 from simulator.plot import Plot
 import simulator.simulator_utils as s_utils
@@ -100,7 +103,7 @@ class ReportGenerator:
     """
     doc = tex.Document(self._pdf_filename)
     doc.append("""Results
-        
+
 
         """)
 
@@ -150,7 +153,7 @@ class ReportGenerator:
 
   def _create_specs_table(self, doc):
     """Generates summary table."""
-    
+
     col_names = ['Model',
                  'Dataset',
                  'Data Size',
@@ -160,7 +163,7 @@ class ReportGenerator:
                  'Batch Size',
                  'Noise Type',
                  'Proba Coeff']
-    
+
     table_spec = "|@{}l@{}".join(['' for i in range(len(col_names) + 1)]) + '|'
 
     tabular = tex.Tabular(table_spec,
@@ -456,7 +459,7 @@ class MultiSummaryExtractor:
     dirname = os.path.abspath(os.path.dirname(__file__))
     self._dirname = os.path.join(dirname, 'summaries')
     filenames = os.listdir(self._dirname)
-    
+
     if not isinstance(names, list) or not names:
       raise TypeError("`names` argument must be non-empty list.")
     if any(name not in filenames for name in names):
@@ -617,8 +620,8 @@ class SummaryReportGenerator:
               'rosybrown',
               'tomato']
   _colors += _colors
-  def __init__(self, names, labels, simulation_num=0, report_name='summary_report', sample_every=1,
-               lower=500, higher=700):
+  def __init__(self, names, labels, simulation_num=0, report_name='summary_report',
+               sample_every=1, lower=500, higher=700):
     self._simulation_num = simulation_num
     self._summ_ext = {f:SummaryExtractor(f) for f in names}
     self._original_names = []
@@ -665,26 +668,34 @@ class SummaryReportGenerator:
     plt.close()
 
     with doc.create(tex.Figure(position=self._position)) as plot_:
-      plot_.add_image(self._plot_train_test_min_error_with_markers(self._sample_every,
-                                                                   self._simulation_num,
-                                                                   lower=self.lower,
-                                                                   higher=self.higher))
-      plot_.add_caption('Train-test min error with swap markers')
-    plt.close()
-
-    with doc.create(tex.Figure(position=self._position)) as plot_:
       plot_.add_image(self._plot_train_test_min_loss(self._sample_every,
                                                      self._simulation_num))
       plot_.add_caption('Train-test min loss')
     plt.close()
 
-    with doc.create(tex.Figure(position=self._position)) as plot_:
-      plot_.add_image(self._plot_train_test_min_loss_with_markers(self._sample_every,
-                                                                  self._simulation_num,
-                                                                  lower=self.lower,
-                                                                  higher=self.higher))
-      plot_.add_caption('Train-test min loss with swap markers')
-    plt.close()
+    for name, se in self._summ_ext.items():
+      with doc.create(tex.Figure(position=self._position)) as plot_:
+        plot_.add_image(self._plot_train_test_error_epochs_diffusion(se, self._simulation_num))
+        plot_.add_caption('Train-Test Error vs Diffusion vs Epochs for ' + str(se.get_name()))
+      plt.close()
+
+    for name, se in self._summ_ext.items():
+      with doc.create(tex.Figure(position=self._position)) as plot_:
+        plot_.add_image(self._plot_train_test_loss_epochs_diffusion(se, self._simulation_num))
+        plot_.add_caption('Train-Test Loss vs Diffusion vs Epochs for ' + str(se.get_name()))
+      plt.close()
+
+    for name, se in self._summ_ext.items():
+      with doc.create(tex.Figure(position=self._position)) as plot_:
+        plot_.add_image(self._plot_train_test_error_gap(se, self._simulation_num))
+        plot_.add_caption('Train-Test Error Gap for ' + str(se.get_name()))
+      plt.close()
+
+    for name, se in self._summ_ext.items():
+      with doc.create(tex.Figure(position=self._position)) as plot_:
+        plot_.add_image(self._plot_train_test_loss_gap(se, self._simulation_num))
+        plot_.add_caption('Train-Test Loss Gap for ' + str(se.get_name()))
+      plt.close()
 
     for name, se in self._summ_ext.items():
       with doc.create(tex.Figure(position=self._position)) as plot_:
@@ -715,6 +726,23 @@ class SummaryReportGenerator:
       plt.close()
 
     with doc.create(tex.Figure(position=self._position)) as plot_:
+      plot_.add_image(self._plot_train_test_min_error_with_markers(
+          self._sample_every, self._simulation_num, lower=self.lower,
+          higher=self.higher))
+      plot_.add_caption('Train-test min error with swap markers')
+
+    plt.close()
+
+    with doc.create(tex.Figure(position=self._position)) as plot_:
+      plot_.add_image(self._plot_train_test_min_loss_with_markers(self._sample_every,
+                                                                  self._simulation_num,
+                                                                  lower=self.lower,
+                                                                  higher=self.higher))
+      plot_.add_caption('Train-test min loss with swap markers')
+
+    plt.close()
+
+    with doc.create(tex.Figure(position=self._position)) as plot_:
       plot_.add_image(self._plot_train_test_error(self._sample_every,
                                                   self._simulation_num))
       plot_.add_caption('Train-test error (everything together)')
@@ -727,7 +755,6 @@ class SummaryReportGenerator:
     plt.close()
 
     doc.generate_pdf(clean_tex=True)
-
 
 
   def generate_min_loss_err_report(self, simulation_nums, custom_text='Results'):
@@ -760,7 +787,7 @@ class SummaryReportGenerator:
       se = self._summ_ext[name]
 
       for r in range(se.get_description()['n_replicas']):
-        
+
         x, y = se.get_summary(summ_name='test_error',
                               replica_id=r,
                               simulation_num=self._simulation_num)
@@ -786,7 +813,7 @@ class SummaryReportGenerator:
           linewidth_train = 1.5
           linewidth_test = 1.5
           color_idx += 1
-        
+
         plot.plot(x,
                   y,
                   fig=fig,
@@ -799,7 +826,7 @@ class SummaryReportGenerator:
 
         #y1 = [(a + b) / 2 for a, b in zip(y1[::2], y1[1::2])]
         y1 = y1[::sample_every]
-        
+
 
         plot.plot(np.linspace(start=0, stop=n_epochs, num=len(y1)),
                   y1,
@@ -820,7 +847,7 @@ class SummaryReportGenerator:
     return img_path
 
   def _plot_train_test_min_error_with_markers(self, sample_every=1, simulation_num=0, lower=500, higher=700):
-    
+
     def _get_next_yloc():
       for y in self.yaxis_cycle*10000:
         yield y['y']
@@ -884,7 +911,8 @@ class SummaryReportGenerator:
                 linestyle=linestyle_train,
                 color=color,
                 splined_points_mult=None)
-      x, noise_vals = se.get_summary('noise_values', replica_id=min_rid, simulation_num=simulation_num)
+      x, noise_vals = se.get_summary(
+          'noise_values', replica_id=min_rid, simulation_num=simulation_num)
       noises = sorted(list(set(noise_vals)))
       noises = [(n, i) for i, n in enumerate(noises)]
       noise_keys = {n:i for n, i in noises}
@@ -895,7 +923,7 @@ class SummaryReportGenerator:
           ax.axvline(x[i])
           ax.text(x[i-1], next_yloc.__next__(), str(noise_keys[noise_vals[i-1]]) + '->' + str(noise_keys[noise]))
           added_noise_keys = noise_keys
-          
+
     if added_noise_keys:
       xlabel = 'EPOCHS\n' + json.dumps(added_noise_keys)
     else:
@@ -943,7 +971,7 @@ class SummaryReportGenerator:
         linewidth_test = 1.5
         color_idx += 1
       #y_vals = y[5:].copy()
-      #chunkified = [(np.mean(s), int((idx + 1)*avg_interval/2)) 
+      #chunkified = [(np.mean(s), int((idx + 1)*avg_interval/2))
       #              for idx, s in enumerate(y_vals[i:i+avg_interval] for i in range(0, len(y_vals), avg_interval))]
       #annots = [("{0:.3f}".format(c[0]), x[_find_nearest_idx(x, c[1])], )]
       plot.plot(x,
@@ -958,7 +986,7 @@ class SummaryReportGenerator:
 
       y1 = [(a + b) / 2 for a, b in zip(y1[::2], y1[1::2])]
       y1 = y1[::sample_every]
-      
+
 
       plot.plot(np.linspace(start=0, stop=n_epochs, num=len(y1)),
                 y1,
@@ -1013,7 +1041,7 @@ class SummaryReportGenerator:
         linewidth_train = 1.5
         linewidth_test = 1.5
         color_idx += 1
-      
+
       plot.plot(x,
                 y,
                 fig=fig,
@@ -1026,7 +1054,7 @@ class SummaryReportGenerator:
 
       y1 = [(a + b) / 2 for a, b in zip(y1[::2], y1[1::2])]
       y1 = y1[::sample_every]
-      
+
 
       plot.plot(np.linspace(start=0, stop=n_epochs, num=len(y1)),
                 y1,
@@ -1044,6 +1072,38 @@ class SummaryReportGenerator:
                 ylabel='LOSS',)
     img_path = os.path.join(self._images_dirname,
                             'train_test_min_loss' + str(simulation_num) + '.png')
+    plt.savefig(img_path, bbox_inches='tight')
+    return img_path
+
+  def _plot_train_test_error_epochs_diffusion(self, se, simulation_num=0):
+    se._plot_diffusion_vs_min_error(simulation_num=simulation_num)
+    img_path = os.path.join(
+        self._images_dirname,
+        'train_test_error_epochs_diffusion'+se.get_name()+'.png')
+    plt.savefig(img_path, bbox_inches='tight')
+    return img_path
+  
+  def _plot_train_test_loss_epochs_diffusion(self, se, simulation_num=0):
+    se._plot_diffusion_vs_min_loss(simulation_num=simulation_num)
+    img_path = os.path.join(
+        self._images_dirname,
+        'train_test_loss_epochs_diffusion'+se.get_name()+'.png')
+    plt.savefig(img_path, bbox_inches='tight')
+    return img_path
+
+  def _plot_train_test_error_gap(self, se, simulation_num=0):
+    se._plot_train_test_error_gap(simulation_num)
+    img_path = os.path.join(
+        self._images_dirname,
+        'train_test_error_gap_diffusion'+se.get_name()+'.png')
+    plt.savefig(img_path, bbox_inches='tight')
+    return img_path
+
+  def _plot_train_test_loss_gap(self, se, simulation_num=0):
+    se._plot_train_test_loss_gap(simulation_num)
+    img_path = os.path.join(
+        self._images_dirname,
+        'train_test_loss_gap_diffusion'+se.get_name()+'.png')
     plt.savefig(img_path, bbox_inches='tight')
     return img_path
 
@@ -1124,7 +1184,7 @@ class SummaryReportGenerator:
           ax.axvline(x[i])
           ax.text(x[i-1], text_loc + next_yloc.__next__()*5, str(noise_keys[noise_vals[i-1]]) + '->' + str(noise_keys[noise]))
           added_noise_keys = noise_keys
-          
+
     if added_noise_keys:
       xlabel = 'EPOCHS\n' + json.dumps(added_noise_keys)
     else:
@@ -1163,7 +1223,7 @@ class SummaryReportGenerator:
       se = self._summ_ext[name]
 
       for r in range(se.get_description()['n_replicas']):
-        
+
         x, y = se.get_summary(summ_name='test_loss',
                               replica_id=r,
                               simulation_num=simulation_num)
@@ -1189,7 +1249,7 @@ class SummaryReportGenerator:
           linewidth_train = 1.5
           linewidth_test = 1.5
           color_idx += 1
-        
+
         plot.plot(x,
                   y,
                   fig=fig,
@@ -1202,7 +1262,7 @@ class SummaryReportGenerator:
 
         y1 = [(a + b) / 2 for a, b in zip(y1[::2], y1[1::2])]
         y1 = y1[::sample_every]
-        
+
 
         plot.plot(np.linspace(start=0, stop=n_epochs, num=len(y1)),
                   y1,
@@ -1229,7 +1289,7 @@ class SummaryReportGenerator:
 
     color_idx = 0
     for r in range(se.get_description()['n_replicas']):
-        
+
       x, y = se.get_summary(summ_name='test_error',
                             replica_id=r,
                             simulation_num=simulation_num)
@@ -1255,7 +1315,7 @@ class SummaryReportGenerator:
         linewidth_train = 1.5
         linewidth_test = 1.5
         color_idx += 1
-      
+
       plot.plot(x,
                 y,
                 fig=fig,
@@ -1268,7 +1328,7 @@ class SummaryReportGenerator:
 
       y1 = [(a + b) / 2 for a, b in zip(y1[::2], y1[1::2])]
       y1 = y1[::sample_every]
-      
+
 
       plot.plot(np.linspace(start=0, stop=n_epochs, num=len(y1)),
                 y1,
@@ -1285,7 +1345,7 @@ class SummaryReportGenerator:
                 xlabel='EPOCHS',
                 ylabel='ERROR',)
     img_path = os.path.join(
-        self._images_dirname, 
+        self._images_dirname,
         'train_test_error_per_sim'+se.get_name()+'.png')
     plt.savefig(img_path, bbox_inches='tight')
     return img_path
@@ -1297,7 +1357,7 @@ class SummaryReportGenerator:
 
     color_idx = 0
     for r in range(se.get_description()['n_replicas']):
-        
+
       x, y = se.get_summary(summ_name='test_loss',
                             replica_id=r,
                             simulation_num=simulation_num)
@@ -1323,7 +1383,7 @@ class SummaryReportGenerator:
         linewidth_train = 1.5
         linewidth_test = 1.5
         color_idx += 1
-      
+
       plot.plot(x,
                 y,
                 fig=fig,
@@ -1336,7 +1396,7 @@ class SummaryReportGenerator:
 
       y1 = [(a + b) / 2 for a, b in zip(y1[::2], y1[1::2])]
       y1 = y1[::sample_every]
-      
+
 
       plot.plot(np.linspace(start=0, stop=n_epochs, num=len(y1)),
                 y1,
@@ -1353,7 +1413,7 @@ class SummaryReportGenerator:
                 xlabel='EPOCHS',
                 ylabel='ERROR',)
     img_path = os.path.join(
-        self._images_dirname, 
+        self._images_dirname,
         'train_test_loss_per_sim'+se.get_name()+'.png')
     plt.savefig(img_path, bbox_inches='tight')
     return img_path
@@ -1408,12 +1468,12 @@ class SummaryReportGenerator:
       table.add_hline()
       table.add_row(col_names)
       table.add_hline()
-      
+
       for summ_ext in self._summ_ext:
         vals_ = {n:[] for n in col_names}
         se = self._summ_ext[summ_ext]
         desc = se.get_description()
-        
+
         vals_['Accept'].append("{0:.3f}".format(se.get_accept_ratio()))
         vals_['Mixing'].append("{0:.3f}".format(se.get_mix_ratio()))
         vals_['Visit'].append("{0:.3f}".format(se.get_visit_ratio()))
@@ -1440,7 +1500,7 @@ class SummaryReportGenerator:
 
         table.add_row(row)
         table.add_hline()
-    
+
 class SummaryExtractor:
 
   def __init__(self, name):
@@ -1554,7 +1614,7 @@ class SummaryExtractor:
     for r in range(self._n_replicas):
       result[r] = np.mean(reps[r])
     self._vals['__debug__err_differ'] = result
-    
+
     err_differ = np.mean(err_differs)
     err_differ_std = np.std(err_differs)
 
@@ -1590,7 +1650,7 @@ class SummaryExtractor:
           candidate_losses.append(y_loss[loss_idx])
           candidate_diffs.append(y_diff[diff_idx])
           candidate_steps.append(x_loss[loss_idx])
-        
+
         self._vals['replica_id_min_err_sim_' + str(s)] = np.argmin(candidate_losses)
 
         idx = np.argmin(np.asarray(candidate_losses))
@@ -1613,13 +1673,13 @@ class SummaryExtractor:
       self._vals['avg_steps_for_min_error'] = step_val
       self._vals['avg_steps_for_min_error_err'] = step_err
 
-    
+
     else:
       loss_val = self._vals['avg_min_error']
       loss_err = self._vals['avg_min_error_err']
       diff_val = self._vals['avg_diff_for_min_error']
       diff_err = self._vals['avg_diff_for_min_error_err']
-    
+
     sep = self.get_description()['separation_ratio']
     return diff_val, diff_err, loss_val, loss_err, sep
 
@@ -1648,7 +1708,7 @@ class SummaryExtractor:
 
   def get_sep_ratio_vs_accept_ratio(self):
     """Returns a tuple (`sep_ratio`, `accept_ratio`, `stddev`)."""
-    
+
     sep = self.get_description()['separation_ratio']
     acc = self.get_accept_ratio()
     stddev = self._vals['accept_ratio_err']
@@ -1691,7 +1751,7 @@ class SummaryExtractor:
           err_differ,
           '+/-',
           err_differ_std)
-    
+
     print()
     _ = self._plot_loss(summ_name='test_loss',
                         simulation_num=simulation_num,
@@ -1702,6 +1762,11 @@ class SummaryExtractor:
     _ = self._plot_error(summ_name='test_error',
                          simulation_num=simulation_num,
                          sample_every=sample_every)
+    _ = self._plot_diffusion_vs_min_error(simulation_num=simulation_num)
+    _ = self._plot_diffusion_vs_min_loss(simulation_num=simulation_num)
+    _ = self._plot_train_test_error_gap(simulation_num=simulation_num)
+    _ = self._plot_train_test_loss_gap(simulation_num=simulation_num)
+
     _ = self._plot_error(summ_name='train_error',
                          simulation_num=simulation_num,
                          sample_every=sample_every)
@@ -1712,6 +1777,7 @@ class SummaryExtractor:
                          sample_every=sample_every)
     _ = self._plot_norms(simulation_num=simulation_num)
     '''
+  
   def get_accept_ratio(self):
     accepts = []
     if self._vals['accept_ratio'] is None:
@@ -1835,6 +1901,227 @@ class SummaryExtractor:
     plot.legend(fig, ax, legend_title='ReplicaID',
                 xlabel='EPOCHS', ylabel='DIFFUSION')
     return fig
+
+  def _plot_diffusion_vs_min_error(self, replica_id=0, simulation_num=0):
+
+    _ = self.get_sep_ratio_vs_min_error()
+    min_rid = self._vals['replica_id_min_err_sim_' + str(simulation_num)]
+    x_test, y_test = self.get_summary('test_error',
+                                      replica_id=min_rid,
+                                      simulation_num=simulation_num)
+    x_train, y_train = self.get_summary('train_error',
+                                        replica_id=min_rid,
+                                        simulation_num=simulation_num)
+    x_diff, y_diff = self.get_summary('diffusion',
+                                      replica_id=min_rid,
+                                      simulation_num=simulation_num)
+
+    #return x_test, y_test, x_train, y_train, x_diff, y_diff
+
+    result = dict(train=[], test=[], diff=[])
+
+    sorted_ = sorted([('train', y_train, x_train, len(y_train)),
+                      ('test', y_test, x_test, len(y_test)),
+                      ('diff', y_diff, x_diff, len(y_diff))], key=lambda x: x[3])
+
+    for i in range(sorted_[0][3]):
+      result[sorted_[0][0]].append(sorted_[0][1][i])
+      result[sorted_[1][0]].append(sorted_[1][1][_find_nearest_idx(sorted_[1][2], sorted_[0][2][i])])
+      result[sorted_[2][0]].append(sorted_[2][1][_find_nearest_idx(sorted_[2][2], sorted_[0][2][i])])
+
+    x_test = np.linspace(start=0, stop=self.get_description()['n_epochs'], num=len(result['test']))
+    x_train = np.linspace(start=0, stop=self.get_description()['n_epochs'], num=len(result['train']))
+    x_diff = np.linspace(start=0, stop=self.get_description()['n_epochs'], num=len(result['diff']))
+
+
+    fig = plt.figure()
+    fig.set_size_inches(20, 10)
+
+    ax = fig.gca(projection='3d')
+    
+    #ax.plot(x_test, np.asarray(result['test']), np.asarray(result['diff']),
+    #        label='Test Error', color=self._colors[0], linewidth=1.2)
+    ax.plot(x_test, np.asarray(result['test']), np.zeros(len(result['test'])),
+            color=self._colors[0], linewidth=1, label='Test Error')
+    ax.plot(x_test, np.ones(len(result['test'])), result['diff'],
+            color=self._colors[0], linewidth=1)
+
+    #ax.plot(x_train, np.asarray(result['train']), np.asarray(result['diff']),
+    #        color=self._colors[1], linestyle='--', label='Train Error', linewidth=1.2)
+    ax.plot(x_train, np.asanyarray(result['train']), np.zeros(len(result['train'])),
+            color=self._colors[1], linestyle='--', linewidth=1, label='Train Error')
+
+    ax.view_init(20, 270)
+    
+    plt.xlabel('EPOCHS')
+    plt.ylabel('Error')
+    ax.set_zlabel('Diffusion')
+    plt.legend()
+    #loc = plticker.MultipleLocator(base=len(result[sorted_[0][0]])//20)
+    #ax.xaxis.set_major_locator(loc)
+    xticks = [int(x/10)*10 for x in np.linspace(0, self.get_description()['n_epochs'], 20)]
+    ax.set_xticks(xticks)
+
+  def _plot_diffusion_vs_min_loss(self, replica_id=0, simulation_num=0):
+
+    _ = self.get_sep_ratio_vs_min_error()
+    min_rid = self._vals['replica_id_min_err_sim_' + str(simulation_num)]
+    x_test, y_test = self.get_summary('test_loss',
+                                      replica_id=min_rid,
+                                      simulation_num=simulation_num)
+    x_train, y_train = self.get_summary('train_loss',
+                                        replica_id=min_rid,
+                                        simulation_num=simulation_num)
+    x_diff, y_diff = self.get_summary('diffusion',
+                                      replica_id=min_rid,
+                                      simulation_num=simulation_num)
+
+    #return x_test, y_test, x_train, y_train, x_diff, y_diff
+
+    result = dict(train=[], test=[], diff=[])
+
+    sorted_ = sorted([('train', y_train, x_train, len(y_train)),
+                      ('test', y_test, x_test, len(y_test)),
+                      ('diff', y_diff, x_diff, len(y_diff))], key=lambda x: x[3])
+
+    for i in range(sorted_[0][3]):
+      result[sorted_[0][0]].append(sorted_[0][1][i])
+      result[sorted_[1][0]].append(sorted_[1][1][_find_nearest_idx(sorted_[1][2], sorted_[0][2][i])])
+      result[sorted_[2][0]].append(sorted_[2][1][_find_nearest_idx(sorted_[2][2], sorted_[0][2][i])])
+
+    x_test = np.linspace(start=0, stop=self.get_description()['n_epochs'], num=len(result['test']))
+    x_train = np.linspace(start=0, stop=self.get_description()['n_epochs'], num=len(result['train']))
+    x_diff = np.linspace(start=0, stop=self.get_description()['n_epochs'], num=len(result['diff']))
+
+
+    fig = plt.figure()
+    fig.set_size_inches(20, 10)
+
+    ax = fig.gca(projection='3d')
+    
+    #ax.plot(x_test, np.asarray(result['test']), np.asarray(result['diff']),
+    #        label='Test Loss', color=self._colors[0], linewidth=1.2)
+    ax.plot(x_test, np.asarray(result['test']), np.zeros(len(result['test'])),
+            color=self._colors[0], linewidth=1, label='Test Loss')
+    ax.plot(x_test, 5*np.ones(len(result['test'])), result['diff'],
+            color=self._colors[0], linewidth=1,)
+
+    #ax.plot(x_train, np.asarray(result['train']), np.asarray(result['diff']),
+    #        color=self._colors[1], linestyle='--', label='Train Loss', linewidth=1.2)
+    ax.plot(x_train, np.asanyarray(result['train']), np.zeros(len(result['train'])),
+            color=self._colors[1], linestyle='--', linewidth=1, label='Train Loss')
+
+    ax.view_init(20, 270)
+    
+    plt.xlabel('EPOCHS')
+    plt.ylabel('Loss')
+    ax.set_zlabel('Diffusion')
+    plt.legend()
+
+    xticks = [int(x/10)*10 for x in np.linspace(0, self.get_description()['n_epochs'], 20)]
+    ax.set_xticks(xticks)
+    
+  def _plot_train_test_error_gap(self, simulation_num=0):
+
+    _ = self.get_sep_ratio_vs_min_error()
+    min_rid = self._vals['replica_id_min_err_sim_' + str(simulation_num)]
+    x_test, y_test = self.get_summary('test_error',
+                                      replica_id=min_rid,
+                                      simulation_num=simulation_num)
+    x_train, y_train = self.get_summary('train_error',
+                                        replica_id=min_rid,
+                                        simulation_num=simulation_num)
+    x_diff, y_diff = self.get_summary('diffusion',
+                                      replica_id=min_rid,
+                                      simulation_num=simulation_num)
+
+    #return x_test, y_test, x_train, y_train, x_diff, y_diff
+
+    result = dict(train=[], test=[], diff=[])
+
+    sorted_ = sorted([('train', y_train, x_train, len(y_train)),
+                      ('test', y_test, x_test, len(y_test)),
+                      ('diff', y_diff, x_diff, len(y_diff))], key=lambda x: x[3])
+
+    for i in range(sorted_[0][3]):
+      result[sorted_[0][0]].append(sorted_[0][1][i])
+      result[sorted_[1][0]].append(sorted_[1][1][_find_nearest_idx(sorted_[1][2], sorted_[0][2][i])])
+      result[sorted_[2][0]].append(sorted_[2][1][_find_nearest_idx(sorted_[2][2], sorted_[0][2][i])])
+
+    x_gap = np.linspace(start=0, stop=self.get_description()['n_epochs'], num=len(result['test']))
+    #x_train = np.linspace(start=0, stop=self.get_description()['n_epochs'], num=len(result['train']))
+    x_diff = np.linspace(start=0, stop=self.get_description()['n_epochs'], num=len(result['diff']))
+    y_gap = np.asarray(result['test']) - np.asarray(result['train'])
+
+    fig = plt.figure()
+    fig.set_size_inches(20, 10)
+
+    ax = fig.gca(projection='3d')
+    
+    ax.plot(x_gap, y_gap, np.asarray(result['diff']),
+            label='Test-Train Error Gap', color=self._colors[0], linewidth=1.2)
+    ax.plot(x_gap, y_gap, np.zeros(len(result['test'])),
+            color=self._colors[0], linewidth=0.7)
+    ax.plot(x_gap, np.ones(len(result['test'])), result['diff'],
+            color=self._colors[0], linewidth=0.7,)
+
+    ax.view_init(20, 270)
+    
+    plt.xlabel('EPOCHS')
+    plt.ylabel('Error Gap')
+    ax.set_zlabel('Diffusion')
+    plt.legend()
+
+  def _plot_train_test_loss_gap(self, simulation_num=0):
+
+    _ = self.get_sep_ratio_vs_min_error()
+    min_rid = self._vals['replica_id_min_err_sim_' + str(simulation_num)]
+    x_test, y_test = self.get_summary('test_loss',
+                                      replica_id=min_rid,
+                                      simulation_num=simulation_num)
+    x_train, y_train = self.get_summary('train_loss',
+                                        replica_id=min_rid,
+                                        simulation_num=simulation_num)
+    x_diff, y_diff = self.get_summary('diffusion',
+                                      replica_id=min_rid,
+                                      simulation_num=simulation_num)
+
+    #return x_test, y_test, x_train, y_train, x_diff, y_diff
+
+    result = dict(train=[], test=[], diff=[])
+
+    sorted_ = sorted([('train', y_train, x_train, len(y_train)),
+                      ('test', y_test, x_test, len(y_test)),
+                      ('diff', y_diff, x_diff, len(y_diff))], key=lambda x: x[3])
+
+    for i in range(sorted_[0][3]):
+      result[sorted_[0][0]].append(sorted_[0][1][i])
+      result[sorted_[1][0]].append(sorted_[1][1][_find_nearest_idx(sorted_[1][2], sorted_[0][2][i])])
+      result[sorted_[2][0]].append(sorted_[2][1][_find_nearest_idx(sorted_[2][2], sorted_[0][2][i])])
+
+    x_gap = np.linspace(start=0, stop=self.get_description()['n_epochs'], num=len(result['test']))
+    #x_train = np.linspace(start=0, stop=self.get_description()['n_epochs'], num=len(result['train']))
+    x_diff = np.linspace(start=0, stop=self.get_description()['n_epochs'], num=len(result['diff']))
+    y_gap = np.asarray(result['test']) - np.asarray(result['train'])
+
+    fig = plt.figure()
+    fig.set_size_inches(20, 10)
+
+    ax = fig.gca(projection='3d')
+    
+    ax.plot(x_gap, y_gap, np.asarray(result['diff']),
+            label='Test-Train Loss Gap', color=self._colors[0], linewidth=1.2)
+    ax.plot(x_gap, y_gap, np.zeros(len(result['test'])),
+            color=self._colors[0], linewidth=0.7)
+    ax.plot(x_gap, 5*np.ones(len(result['test'])), result['diff'],
+            color=self._colors[0], linewidth=0.7,)
+
+    ax.view_init(20, 270)
+    
+    plt.xlabel('EPOCHS')
+    plt.ylabel('Loss Gap')
+    ax.set_zlabel('Diffusion')
+    plt.legend()
 
   def _plot_grads(self, simulation_num=0, sample_every=1):
     fig, ax = plt.subplots()

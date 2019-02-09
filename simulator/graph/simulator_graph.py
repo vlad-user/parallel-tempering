@@ -493,14 +493,17 @@ class SimulatorGraph:
     i = beta_id[random_pair][1]
     j = beta_id[random_pair+1][1]
 
+    beta_i = beta_id[random_pair][0]
+    beta_j = beta_id[random_pair+1][0]
+
     loss_list = self.extract_evaluated_tensors(evaluated, 'loss')
 
     li, lj = loss_list[i], loss_list[j]
-    proba = np.exp(self._proba_coeff*(li-lj)*(beta[i]-beta[j]))
+    proba = np.exp(self._proba_coeff*(li-lj)*(beta_i-beta_j))
 
     if np.random.uniform() < proba:
-      self._curr_noise_dict[i] = beta[j]
-      self._curr_noise_dict[j] = beta[i]
+      self._curr_noise_dict[i] = beta_j
+      self._curr_noise_dict[j] = beta_i
       self._optimizer_dict[i].set_train_route(j)
       self._optimizer_dict[j].set_train_route(i)
 

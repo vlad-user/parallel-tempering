@@ -398,8 +398,8 @@ class Simulator: # pylint: disable=too-many-instance-attributes
               
             else:
               # If dropout than evaluate loss, error separately from
-              # evaluation of gradients because dropout will cause to
-              # underperform.
+              # evaluation of gradients because dropout drops neurons
+
               feed_dict = g.create_feed_dict(batch['X'], batch['y'], dataset_type='test')
               ops = g.get_train_ops(dataset_type='test', special_ops=special_ops)
               loss_err_evaled = sess.run(ops, feed_dict=feed_dict)

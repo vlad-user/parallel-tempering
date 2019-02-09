@@ -4,7 +4,9 @@ class InvalidTensorTypeError(Exception):
   pass
 
   def __str__(self, ):
-    return "Available tensor types are: 'cross_entropy', 'error', 'special_vals'."
+    err_msg = ("Available tensor types are: 'cross_entropy', 'error', ",
+               "'special_vals'.")
+    return err_msg
 
 class InvalidDatasetTypeError(Exception): # pylint: disable=missing-docstring
   pass # pylint: disable=unnecessary-pass

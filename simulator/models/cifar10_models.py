@@ -107,14 +107,15 @@ def lenet2(graph):
 
       with tf.name_scope('fc1'):
         flatten = tf.layers.Flatten()(max_pool3)
-        fc1 = nn_layer(X=flatten, n_neurons=50, name='fc1', activation=tf.nn.relu)
+        fc1 = nn_layer(X=flatten, n_neurons=50, name='fc1',
+                       activation=tf.nn.relu)
       with tf.name_scope('logits'):
         logits = nn_layer(X=fc1, n_neurons=10, name='logits', activation=None)
 
   return X, y, is_train, logits
 
 def lenet2_dropout(graph):
-  """Lenet-7, no dropout"""
+  """Lenet-7 with dropout dropout"""
   with graph.as_default():
     is_train = tf.placeholder(tf.bool, shape=(), name='is_train')
     keep_prob = tf.placeholder(tf.float32, shape=(), name='keep_prob')
@@ -378,17 +379,17 @@ def cnn_cifar10_model(graph):
 
       with tf.name_scope('pool1'):
 
-        pool1 = tf.nn.max_pool( conv1, 
+        pool1 = tf.nn.max_pool( conv1,
                     ksize=[1, 3, 3, 1],
                     strides=[1, 2, 2, 1],
                     padding='SAME',
                     name='pool1')
 
       with tf.name_scope('norm1'):
-        norm1 = tf.nn.lrn(  pool1, 
-                  4, 
-                  bias=1.0, 
-                  alpha=0.001 / 9.0, 
+        norm1 = tf.nn.lrn(  pool1,
+                  4,
+                  bias=1.0,
+                  alpha=0.001 / 9.0,
                   beta=0.75,
                   name='norm1')
 
@@ -406,20 +407,20 @@ def cnn_cifar10_model(graph):
         conv2 = tf.nn.relu(pre_activation)
 
       with tf.name_scope('norm2'):
-        norm2 = tf.nn.lrn(  conv2, 
-                  4, 
-                  bias=1.0, 
-                  alpha=0.001 / 9.0, 
+        norm2 = tf.nn.lrn(  conv2,
+                  4,
+                  bias=1.0,
+                  alpha=0.001 / 9.0,
                   beta=0.75,
                   name='norm2')
 
       with tf.name_scope('pool2'):
-        pool2 = tf.nn.max_pool( norm2, 
+        pool2 = tf.nn.max_pool( norm2,
                     ksize=[1, 3, 3, 1],
                     strides=[1, 2, 2, 1],
                     padding='SAME',
                     name='pool2')
-      
+
 
 
       with tf.name_scope('fully_connected1'):
@@ -497,7 +498,7 @@ def cnn_cifar10_nodropout_small_batch_norm(graph):
 
       with tf.name_scope('y'):
         y = tf.placeholder(tf.int32, shape=[None], name='y')
-    
+
     with tf.name_scope('conv1'):
       conv1 = tf.layers.conv2d(X_reshaped,
                                filters=6,
@@ -619,25 +620,25 @@ def cnn_cifar10_model4(graph):
   with graph.as_default():
     with tf.name_scope('Input'):
       with tf.name_scope('X'):
-        X = tf.placeholder(DTYPE, shape=[None, n_inputs], 
+        X = tf.placeholder(DTYPE, shape=[None, n_inputs],
           name='X')
-        X_reshaped = tf.reshape(X, 
+        X_reshaped = tf.reshape(X,
         shape=[-1, height, width, channels])
     with tf.name_scope('y'):
       y = tf.placeholder(tf.int32, shape=[None], name='y')
     with tf.device(gpu_device_name):
       with tf.name_scope('conv1'):
-        conv1 = tf.layers.conv2d(X_reshaped, filters=conv1_fmaps, 
-          kernel_size=conv1_ksize, strides=conv1_stride, 
+        conv1 = tf.layers.conv2d(X_reshaped, filters=conv1_fmaps,
+          kernel_size=conv1_ksize, strides=conv1_stride,
           padding=conv1_pad, activation=tf.nn.relu, name='conv1')
 
       with tf.name_scope('conv2'):
-        conv2 = tf.layers.conv2d(conv1, filters=conv2_fmaps, 
-          kernel_size=conv2_ksize, strides=conv2_stride, 
+        conv2 = tf.layers.conv2d(conv1, filters=conv2_fmaps,
+          kernel_size=conv2_ksize, strides=conv2_stride,
           padding=conv2_pad, activation=tf.nn.relu, name='conv2')
 
       with tf.name_scope('pool3'):
-        pool3 = tf.nn.max_pool(conv2, ksize=[1, 2, 2, 1], 
+        pool3 = tf.nn.max_pool(conv2, ksize=[1, 2, 2, 1],
           strides=[1, 2, 2, 1], padding='VALID')
         s1, s2 = pool3.get_shape().as_list()[1], pool3.get_shape().as_list()[2]
         pool3_flat = tf.reshape(pool3, shape=[-1, pool3_fmaps * s1 * s2])
@@ -681,19 +682,19 @@ def cnn_cifar10_model3(graph):
   with graph.as_default():
     with tf.name_scope('Input'):
       with tf.name_scope('X'):
-        X = tf.placeholder(DTYPE, 
-                  shape=[None, n_inputs], 
+        X = tf.placeholder(DTYPE,
+                  shape=[None, n_inputs],
                   name='X')
-        X_reshaped = tf.reshape(X, 
+        X_reshaped = tf.reshape(X,
                     shape=[-1, height, width, channels])
       with tf.name_scope('y'):
-        y = tf.placeholder( tf.int32, 
-                  shape=[None], 
+        y = tf.placeholder( tf.int32,
+                  shape=[None],
                   name='y')
     with tf.device(gpu_device_name):
       with tf.name_scope('conv1'):
-        conv1 = tf.layers.conv2d( X_reshaped, 
-                      filters=conv1_fmaps, 
+        conv1 = tf.layers.conv2d( X_reshaped,
+                      filters=conv1_fmaps,
                       kernel_size=conv1_ksize,
                       strides=conv1_stride, padding=conv1_pad,
                       activation=tf.nn.relu,
@@ -702,13 +703,13 @@ def cnn_cifar10_model3(graph):
         conv2 = tf.layers.conv2d( conv1,
                       filters=conv2_fmaps,
                       kernel_size=conv2_ksize,
-                      strides=conv2_stride, 
+                      strides=conv2_stride,
                       padding=conv2_pad,
                       activation=tf.nn.relu,
                       name='conv2')
 
       with tf.name_scope('pool3'):
-        pool3 = tf.nn.max_pool( conv2, 
+        pool3 = tf.nn.max_pool( conv2,
                     ksize=[1, 2, 2, 1],
                     strides=[1, 2, 2, 1],
                     padding='VALID')
@@ -754,17 +755,17 @@ def cnn_cifar10_model_no_dropout(graph):
 
     with tf.name_scope('pool1'):
 
-      pool1 = tf.nn.max_pool( conv1, 
+      pool1 = tf.nn.max_pool( conv1,
                   ksize=[1, 3, 3, 1],
                   strides=[1, 2, 2, 1],
                   padding='SAME',
                   name='pool1')
 
     with tf.name_scope('norm1'):
-      norm1 = tf.nn.lrn(  pool1, 
-                4, 
-                bias=1.0, 
-                alpha=0.001 / 9.0, 
+      norm1 = tf.nn.lrn(  pool1,
+                4,
+                bias=1.0,
+                alpha=0.001 / 9.0,
                 beta=0.75,
                 name='norm1')
 
@@ -782,15 +783,15 @@ def cnn_cifar10_model_no_dropout(graph):
       conv2 = tf.nn.relu(pre_activation)
 
     with tf.name_scope('norm2'):
-      norm2 = tf.nn.lrn(  conv2, 
-                4, 
-                bias=1.0, 
-                alpha=0.001 / 9.0, 
+      norm2 = tf.nn.lrn(  conv2,
+                4,
+                bias=1.0,
+                alpha=0.001 / 9.0,
                 beta=0.75,
                 name='norm2')
 
     with tf.name_scope('pool2'):
-      pool2 = tf.nn.max_pool( norm2, 
+      pool2 = tf.nn.max_pool( norm2,
                   ksize=[1, 3, 3, 1],
                   strides=[1, 2, 2, 1],
                   padding='SAME',
@@ -820,25 +821,25 @@ def _variable_with_weight_decay(name, shape, stddev, wd):
     stddev: standard deviation of a truncated Gaussian
     wd: add L2Loss weight decay multiplied by this float. If None, weight
     decay is not added for this Variable.
-  
+
   Returns:
     Variable Tensor
   """
-  
+
   init_val = tf.truncated_normal_initializer(stddev=stddev, dtype=DTYPE)
-  
+
   var = tf.get_variable(name, shape, initializer=init_val, dtype=DTYPE)
   '''
   var = tf.Variable(  initial_value=init_val,
-            validate_shape=True, 
-            dtype=DTYPE, 
+            validate_shape=True,
+            dtype=DTYPE,
             name=name)
   '''
-  
-  
+
+
   if wd is not None:
 
     weight_decay = tf.multiply(tf.nn.l2_loss(var), wd, name='weight_loss')
   #tf.add_to_collection('losses', weight_decay)
-  
+
   return var

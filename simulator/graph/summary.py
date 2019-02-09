@@ -25,10 +25,8 @@ class Summary:
       os.makedirs(self._dirname)
 
     filename = self._create_log_fname(simulation_num=simulation_num)
-    #filename = FNAME_PREFIX + str(simulation_num) + '.log'
-    self._logfile_name = os.path.join(self._dirname, filename)
-    
 
+    self._logfile_name = os.path.join(self._dirname, filename)
     self._train_loss = {i:[] for i in range(self._n_replicas)}
     self._train_err = {i:[] for i in range(self._n_replicas)}
     self._train_steps = []
