@@ -78,6 +78,7 @@ from simulator import read_datasets
 from simulator.simulator import Simulator
 from simulator.summary_extractor import SummaryReportGenerator
 from simulator.models.cifar10_models import lenet1_dropout
+from simulator.models.cifar10_models import lenet1
 from simulator import simulator_utils as s_utils
 
 # hyper-parameters
@@ -135,8 +136,9 @@ for i in range(3):
 
 report = SummaryReportGenerator(names=params['names'],
                                 labels=params['names'],
+                                report_name='my_report',
                                 lower=1000,
                                 higher=1500)
-report.generate_report()
+report.generate_report() # the report is in '/simulator/summaries/reports/my_report'
 
 ```
