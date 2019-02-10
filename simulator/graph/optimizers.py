@@ -222,7 +222,8 @@ class GDOptimizer_v2:
     self.learning_rate = learning_rate
     self.replica_id = replica_id
     self.trainable_variables = None
-    self.tf_optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learning_rate)
+    self.tf_optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learning_rate,
+                                                          use_locking=True)
 
   def minimize(self, loss):
 

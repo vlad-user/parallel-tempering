@@ -207,8 +207,8 @@ class Simulator: # pylint: disable=too-many-instance-attributes
     self._test_batch = max(500, batch_size)
     self._logged = False # if log has been written to disk 
     self._flush_every = flush_every
-    self._train_step = self._swap_step / s_utils.TRAIN_FREQ
-
+    #self._train_step = self._swap_step / s_utils.TRAIN_FREQ
+    self._train_step = min(self._test_step, self._swap_step)
 
   def train_n_times(self, train_data_size=None, **kwargs):
     """Trains `n_simulations` times using the same setup.
@@ -388,10 +388,19 @@ class Simulator: # pylint: disable=too-many-instance-attributes
               special_ops = False
 
             batch = sess.run(next_batch)
-            if self._noise_type not in ['dropout', 'dropout_gd', 'dropout_rmsprop']:
+            #if self._noise_type not in ['dropout', 'dropout_gd', 'dropout_rmsprop']:
+            if True:
               feed_dict = g.create_feed_dict(batch['X'], batch['y'])
-              evaluated = sess.run(g.get_train_ops(special_ops=special_ops),
+              evaluated = sess.run(g.get_train_ops(),
                                    feed_dict=feed_dict)
+              if special_ops:
+                ops = g.get_train_ops(special_ops=special_ops, loss_err=False)
+                diff_ops = ops[:g._n_replicas]
+                evaled_diffs = sess.run(diff_ops)
+                evaluated = (evaluated[:2*self._n_replicas]
+                            + evaled_diffs
+                            + evaluated[-self._n_replicas:])
+
 
               loss = g.extract_evaluated_tensors(evaluated, 'loss')
               err = g.extract_evaluated_tensors(evaluated, 'error')
@@ -402,6 +411,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
 
               feed_dict = g.create_feed_dict(batch['X'], batch['y'], dataset_type='test')
               ops = g.get_train_ops(dataset_type='test', special_ops=special_ops)
+
               loss_err_evaled = sess.run(ops, feed_dict=feed_dict)
               loss = g.extract_evaluated_tensors(loss_err_evaled, 'loss')
               err = g.extract_evaluated_tensors(loss_err_evaled, 'error')

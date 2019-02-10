@@ -232,7 +232,8 @@ def lenet1_dropout(graph):
   """Lenet-5 with dropout."""
   with graph.as_default():
     is_train = tf.placeholder(tf.bool, shape=(), name='is_train')
-    keep_prob = tf.placeholder(tf.float32, shape=(), name='keep_prob')
+    #keep_prob = tf.placeholder(DTYPE, shape=(), name='keep_prob')
+    keep_prob = tf.placeholder_with_default(1.0, shape=())
     with tf.name_scope('Input'):
       with tf.name_scope('X'):
 

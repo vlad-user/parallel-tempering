@@ -5,7 +5,7 @@ import tensorflow as tf
 import numpy as np
 
 from simulator.graph.graph_duplicator import copy_and_duplicate
-from simulator.graph.optimizers import GDOptimizer
+from simulator.graph.optimizers import GDOptimizer_v2 as GDOptimizer
 from simulator.graph.optimizers import NormalNoiseGDOptimizer
 from simulator.graph.optimizers import GDLDOptimizer
 from simulator.graph.optimizers import RMSPropOptimizer
@@ -501,17 +501,17 @@ class SimulatorGraph:
     li, lj = loss_list[i], loss_list[j]
     proba = np.exp(self._proba_coeff*(li-lj)*(beta_i-beta_j))
 
+    self._swap_attempts += 1
     if np.random.uniform() < proba:
       self._curr_noise_dict[i] = beta_j
       self._curr_noise_dict[j] = beta_i
       self._optimizer_dict[i].set_train_route(j)
       self._optimizer_dict[j].set_train_route(i)
 
-      self._swap_attempts += 1
+      
       self._swap_successes += 1
       accept_pair = [(i, 1), (j, 1)]
     else:
-      self._swap_attempts += 1
       accept_pair = [(i, 0), (j, 0)]
 
     for p in accept_pair:
