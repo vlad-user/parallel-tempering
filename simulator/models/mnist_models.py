@@ -11,6 +11,116 @@ from simulator.graph.device_placer import _gpu_device_name
 from simulator.simulator_utils import DTYPE
 from simulator.models.helpers import nn_layer, flatten
 
+from simulator.models.helpers import DEFAULT_INITIALIZER
+
+def lenet1(graph):
+  """Lenet-5, no dropout"""
+  with graph.as_default():
+    is_train = tf.placeholder(tf.bool, shape=(), name='is_train')
+    with tf.name_scope('Input'):
+      with tf.name_scope('X'):
+
+        X = tf.placeholder(DTYPE, shape=[None, 28*28], name='X')
+        X_reshaped = tf.reshape(X, shape=[-1, 28, 28, 1])
+
+      with tf.name_scope('y'):
+        y = tf.placeholder(tf.int32, shape=[None], name='y')
+    with tf.device(_gpu_device_name(0)):
+      with tf.name_scope('conv1'):
+        conv1 = tf.layers.conv2d(X_reshaped,
+                                 filters=6,
+                                 kernel_size=5,
+                                 strides=1,
+                                 padding='valid',
+                                 kernel_initializer=DEFAULT_INITIALIZER,
+                                 activation=tf.nn.relu,
+                                 name='conv1'
+                                 )
+        max_pool1 = tf.nn.max_pool(value=conv1,
+                                   ksize=(1, 2, 2, 1),
+                                   strides=(1, 2, 2, 1),
+                                   padding='VALID',
+                                   name='max_pool1')
+      with tf.name_scope('conv2'):
+        conv2 = tf.layers.conv2d(max_pool1,
+                                 filters=12,
+                                 kernel_size=3,
+                                 strides=1,
+                                 padding='valid',
+                                 activation=tf.nn.relu,
+                                 kernel_initializer=DEFAULT_INITIALIZER,
+                                 name='conv2')
+        max_pool2 = tf.nn.max_pool(value=conv2,
+                                   ksize=(1, 2, 2, 1),
+                                   strides=(1, 2, 2, 1),
+                                   padding='VALID',
+                                   name='max_pool2')
+
+      with tf.name_scope('logits'):
+        flatten = tf.layers.Flatten()(max_pool2)
+        logits = tf.layers.dense(flatten,
+                                 units=10,
+                                 kernel_initializer=DEFAULT_INITIALIZER,
+                                 name='logits')
+
+
+  return X, y, is_train, logits
+
+def lenet1_dropout(graph):
+  """Lenet-5 with dropout."""
+  with graph.as_default():
+    is_train = tf.placeholder(tf.bool, shape=(), name='is_train')
+    #keep_prob = tf.placeholder(DTYPE, shape=(), name='keep_prob')
+    keep_prob = tf.placeholder_with_default(1.0, shape=())
+    with tf.name_scope('Input'):
+      with tf.name_scope('X'):
+
+        X = tf.placeholder(DTYPE, shape=[None, 28*28], name='X')
+        X_reshaped = tf.reshape(X, shape=[-1, 28, 28, 1])
+
+      with tf.name_scope('y'):
+        y = tf.placeholder(tf.int32, shape=[None], name='y')
+    with tf.device(_gpu_device_name(0)):
+      with tf.name_scope('conv1'):
+        conv1 = tf.layers.conv2d(X_reshaped,
+                                 filters=6,
+                                 kernel_size=5,
+                                 strides=1,
+                                 padding='valid',
+                                 activation=tf.nn.relu,
+                                 kernel_initializer=DEFAULT_INITIALIZER,
+                                 name='conv1'
+                                 )
+        max_pool1 = tf.nn.max_pool(value=conv1,
+                                   ksize=(1, 2, 2, 1),
+                                   strides=(1, 2, 2, 1),
+                                   padding='VALID',
+                                   name='max_pool1')
+        max_pool1 = tf.nn.dropout(max_pool1, keep_prob)
+      with tf.name_scope('conv2'):
+        conv2 = tf.layers.conv2d(max_pool1,
+                                 filters=12,
+                                 kernel_size=3,
+                                 strides=1,
+                                 padding='valid',
+                                 activation=tf.nn.relu,
+                                 kernel_initializer=DEFAULT_INITIALIZER,
+                                 name='conv2')
+        max_pool2 = tf.nn.max_pool(value=conv2,
+                                   ksize=(1, 2, 2, 1),
+                                   strides=(1, 2, 2, 1),
+                                   padding='VALID',
+                                   name='max_pool2')
+        max_pool2 = tf.nn.dropout(max_pool2, keep_prob)
+
+      with tf.name_scope('logits'):
+        flatten = tf.layers.Flatten()(max_pool2)
+        logits = tf.layers.dense(flatten,
+                                 units=10,
+                                 kernel_initializer=DEFAULT_INITIALIZER,
+                                 name='logits')
+
+  return X, y, is_train, keep_prob, logits
 
 
 ############################ WORKING MODELS ############################

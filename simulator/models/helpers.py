@@ -1,7 +1,10 @@
 import tensorflow as tf
 import numpy as np
+
 from simulator.graph.device_placer import _gpu_device_name
 from simulator.simulator_utils import DTYPE
+
+DEFAULT_INITIALIZER = tf.contrib.layers.xavier_initializer()
 
 def flatten(tensor, name='flatten'):
   shape = tensor.get_shape().as_list()[1:]

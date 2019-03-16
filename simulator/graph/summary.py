@@ -13,9 +13,10 @@ FNAME_SUFFIX = '.log'
 
 class Summary:
   """Helper class for storing training log."""
-  def __init__(self, name, optimizers, simulation_num):
+  def __init__(self, name, optimizers, losses, simulation_num, hessian=False):
     self._n_replicas = len(optimizers.keys())
     self._name = name
+    self.simulation_num = simulation_num
     dirname = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
     dirname = os.path.join(dirname, 'summaries')
     if not os.path.exists(dirname):
@@ -41,6 +42,13 @@ class Summary:
     self._replica_accepts = {i:[] for i in range(self._n_replicas)}
 
     self._diffusion_ops = self._create_diffusion_ops(optimizers)
+    if hessian:
+      raise NotImplementedError('Currently no need for this.')
+      self._hessian_dirname = os.path.join(self._dirname, 'hessian')
+      if not os.path.exists(self._hessian_dirname):
+        os.makedirs(self._hessian_dirname)
+      self._hess_eigenval_ops = self._create_hessian_eigenvalues_ops(optimizers,
+                                                                     losses)
 
     self._epoch = 0
 
@@ -110,6 +118,53 @@ class Summary:
 
     return _diffusion_ops
 
+  def _create_hessian_eigenvalues_ops(self, optimizers, losses):
+    hessians = {}
+    result = {}
+    def _compute_hessian(grads, vars_):
+      mat = []
+
+      for g in grads:
+        derv = []
+        derv = [tf.gradients(g, v)[0] for v in vars_]
+        derv = [tf.reshape(d, [-1]) for d in derv]
+        concatinated = tf.concat(derv, axis=0)
+              
+
+        
+        mat.append(concatinated)
+
+
+      return tf.stack(mat)
+
+    for i in range(self._n_replicas):
+      with tf.device(_gpu_device_name(i)):
+        grads = optimizers[i]._grads
+        vars_ = optimizers[i].trainable_variables
+        with grads[0].graph.as_default():
+          with tf.name_scope('hessian'):
+            # This implementation doesn't work with 
+            # `sparse_softmax_cross_entropy_with_logits()`s because
+            # implementation has fused interaction with `tf.gradients()`.
+            # Maybe will work in future version.
+            # hessian = tf.hessians(losses[i],
+            #                       vars_,
+            #                       colocate_gradients_with_ops=True)
+            hessian = _compute_hessian(grads, vars_)
+            
+
+          with tf.name_scope('eigenvalues'):
+            evals, evects = tf.linalg.eigh(hessian, name='eigenvalues')
+
+          result[i] = evals
+
+    return result
+
+  def store_hessian_eigenvals(self, eigenvals):
+    picklename = str(self._train_steps[-1]) + '_' + str(self.simulation_num) + '.pkl'
+    picklename = os.path.join(self._hessian_dirname, picklename)
+    with open(picklename, 'wb') as fo:
+      pickle.dump(eigenvals, fo, protocol=pickle.HIGHEST_PROTOCOL)
 
   def _create_gradient_ops(self, optimizers):
     with tf.name_scope('gradient_norms'):
@@ -142,6 +197,9 @@ class Summary:
   def get_grad_norm_ops(self):
     return [self._grad_norm_ops[i] for i in range(self._n_replicas)]
 
+  def get_hessian_eigenvals_ops(self):
+    ops = [self._hess_eigenval_ops[i] for i in range(self._n_replicas)]
+    return [x for x in y for y in ops]
   def add_noise_vals(self, noise_dict):
     """Updates current noise values."""
     for i in range(self._n_replicas):

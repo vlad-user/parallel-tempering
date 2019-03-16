@@ -287,16 +287,17 @@ def copy_to_graph(org_instance, to_graph, namespace="", exclude=None):
         op_def)
     
     ########################################################
-    if StrictVersion(tf.__version__) > StrictVersion("1.9.0"): 
+    if StrictVersion(tf.__version__) == StrictVersion('1.12.0'): 
       to_graph._record_op_seen_by_control_dependencies(new_op)
       for device_function in to_graph._device_functions_outer_to_inner:
         new_op._set_device(device_function(new_op))
-    else:
+    elif StrictVersion(tf.__version__) == StrictVersion('1.9.0'):
       to_graph._add_op(new_op)
       for device_function in reversed(to_graph._device_function_stack):
         new_op._set_device(device_function(new_op)) # pylint: disable=protected-access
         to_graph._record_op_seen_by_control_dependencies(new_op)
-    
+    else:
+      raise ValueError('Not supported tensorflow version.')
     if (replica_id >= 0 and
         'gpu' in op.device.lower()):
       new_op._set_device(_gpu_device_name(replica_id)) # pylint: disable=protected-access

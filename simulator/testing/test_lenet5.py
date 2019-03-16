@@ -37,10 +37,11 @@ def train_cifar(Model,
                 n_epochs=2000,
                 learning_rate=0.01,
                 swap_step=300,
-                test_step=800,
+                test_step=500,
                 proba_coeff=50,
                 noise_list=None,
                 burn_in_period=2000,
+                train_data_size=5000,
                 ):
   ######################################################
   def run_test_epoch(model, pytorch_loss, loader):
@@ -63,7 +64,7 @@ def train_cifar(Model,
   ######################################################
 
   ######################################################
-  train_loader = torch.utils.data.DataLoader(CifarTrainDataset(), batch_size=batch_size)
+  train_loader = torch.utils.data.DataLoader(CifarTrainDataset(train_data_size), batch_size=batch_size)
   test_loader = torch.utils.data.DataLoader(CifarTestDataset(), batch_size=batch_size)
   valid_loader = torch.utils.data.DataLoader(CifarValidationDataset(), batch_size=batch_size)
 
@@ -327,8 +328,8 @@ class CifarDataset(Dataset):
 
 class CifarTrainDataset(CifarDataset):
 
-  def __init__(self):
-    super(CifarTrainDataset, self).__init__()
+  def __init__(self, train_data_size=5000):
+    super(CifarTrainDataset, self).__init__(train_data_size)
 
 
   def __getitem__(self, index):
