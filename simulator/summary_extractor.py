@@ -4,6 +4,7 @@ import pickle
 import json
 import random
 import operator
+import inspect
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -12,6 +13,8 @@ from cycler import cycler
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.ticker as plticker
 from scipy.stats import pearsonr
+from scipy.stats import norm as normal_dist_gen
+import seaborn
 
 from simulator.plot import Plot
 import simulator.simulator_utils as s_utils
@@ -757,6 +760,72 @@ class SummaryReportGenerator:
         plot_.add_caption('Diffusion ' + se.get_name())
       plt.close()
     
+    for name, se in self._summ_ext.items():
+      n_replicas = se.get_description()['n_replicas']
+      if n_replicas == 1:
+        imgpath = self._plot_loss_histogram_for_noise_level(se,)
+        with doc.create(tex.Figure(position=self._position)) as plot_:
+          plot_.add_image(imgpath)
+          caption = ("Histogram of energy distributions for " + se.get_name())
+          plot_.add_caption(caption)
+          plt.close()
+
+      else:
+        for i in range(n_replicas - 1):
+          noise_levels = [i, i+1]
+          imgpath = self._plot_loss_histogram_for_noise_level(
+              se, noise_level=noise_levels)
+          with doc.create(tex.Figure(position=self._position)) as plot_:
+            plot_.add_image(imgpath)
+            caption = ("Histogram of energy distributions for "
+                      + se.get_name()
+                      + " for Noise Levels: "
+                      + '-'.join([str(x) for x in noise_levels])
+                      + '.')
+            plot_.add_caption(caption)
+            plt.close()
+    
+    # m\clearpage must be added. Otherwise overflow
+    doc.append(tex.basic.NewPage())
+
+
+    for name, se in self._summ_ext.items():
+      if (se.get_description()['n_replicas'] == 1
+          or se.get_description()['burn_in_period']==np.inf):
+        continue
+
+      # find rank in terms of min test error for each one of the
+      # replicas
+
+      errs = {}
+      for r in range(se.get_description()['n_replicas']):
+        x, y = se.get_summary('test_error',
+                              replica_id=r,
+                              simulation_num=self._simulation_num)
+        errs[r] = min(y)
+
+      sorted_errs = sorted(list(errs.items()), key=lambda x: x[1])
+      rids_errs_ranks = [(r[0], r[1], i) for i, r in enumerate(sorted_errs)]
+      rids = [r[0] for r in rids_errs_ranks]
+
+      for r in rids_errs_ranks:
+        with doc.create(tex.Figure(position=self._position)) as plot_:
+          plot_.add_image(self._plot_noise_level_histogram(
+              se, replica_id=r[0], simulation_num=self._simulation_num))
+          caption = ('Histogram of noise levels for replica '
+                      + str(r[0])
+                      + " for "
+                      + se.get_name()
+                      + ".\nMin Test Error: "
+                      + str(r[1])
+                      + ", Rank: "
+                      + str(r[2]+1)
+                      + "/"
+                      + str(se.get_description()['n_replicas']))
+
+          plot_.add_caption(caption)
+          plt.close()
+
     with doc.create(tex.Figure(position=self._position)) as plot_:
       plot_.add_image(self._plot_train_test_min_error_with_markers(
           self._sample_every, self._simulation_num, ylim=self.ylim_err,
@@ -1156,7 +1225,7 @@ class SummaryReportGenerator:
     #yaxis_cycle = cycler(y=[0.66, 0.68, 0.7, 0.72, 0.7, 0.68])
     def _get_next_yloc():
       for y in self.yaxis_cycle*10000:
-        yield y['y']
+        yield y['y']/3
     fig, ax = plt.subplots()
     plot = Plot()
     color_idx = 0
@@ -1485,6 +1554,33 @@ class SummaryReportGenerator:
     plt.savefig(img_path, bbox_inches='tight')
     return img_path
 
+  def _plot_noise_level_histogram(self, se, replica_id=0, simulation_num=0):
+    fig = se._plot_noise_level_histogram(replica_id, simulation_num)
+    name = '_'.join(['hist', str(simulation_num), str(replica_id)])
+    name = se.get_name() + name + '.png'
+    
+    img_path = os.path.join(self._images_dirname, name)
+
+    plt.savefig(img_path, bbox_inches='tight')
+
+    return img_path
+
+  def _plot_loss_histogram_for_noise_level(self, se, noise_level=0, simulation_num=0):
+    fig = se._plot_loss_histogram_for_noise_level(noise_level=noise_level,
+                                                  simulation_num=simulation_num)
+
+    levelstr = (str(noise_level) if not isinstance(noise_level, list)
+                else '-'.join([str(x) for x in noise_level])) 
+    name = '_'.join(['hist_loss_noise_levels',
+                     str(simulation_num),
+                     levelstr])
+    name = se.get_name() + name + '.png'
+    
+    img_path = os.path.join(self._images_dirname, name)
+
+    plt.savefig(img_path, bbox_inches='tight')
+
+    return img_path
   def _create_specs_table(self, doc):
     """Generates summary table."""
     #original_names = "\n".join(self._original_names)
@@ -1819,6 +1915,7 @@ class SummaryExtractor:
     _ = self._plot_error(summ_name='test_error',
                          simulation_num=simulation_num,
                          sample_every=sample_every)
+    _ = self._plot_test_err_vs_noise_level_vs_epochs(simulation_num=simulation_num)
     _ = self._plot_diffusion_vs_min_error(simulation_num=simulation_num,
                                           sample_every=sample_every)
     _ = self._plot_diffusion_vs_min_loss(simulation_num=simulation_num,
@@ -1833,6 +1930,7 @@ class SummaryExtractor:
                          sample_every=sample_every)
     _ = self._plot_diffusion(simulation_num=simulation_num)
     _ = self._plot_mixing(simulation_num=simulation_num)
+    _ = self._plot_noise_level_histogram(simulation_num=simulation_num)
     '''
     _ = self._plot_grads(simulation_num=simulation_num,
                          sample_every=sample_every)
@@ -1882,6 +1980,14 @@ class SummaryExtractor:
           d.update(reps)
 
           self._vals['__debug__visit_raw'].append(d)
+          # histograms
+          if 'histograms' not in self._vals:
+            self._vals['histograms'] = {}
+
+          if s not in self._vals['histograms']:
+            self._vals['histograms'][s] = {}
+
+          self._vals['histograms'][s][r] = reps
 
           visiting[r].append(np.mean([1 if reps[x]!=0 else 0 for x in reps]))
           mixing[r].append(1 if all(reps[x]!=0 for x in reps) else 0)
@@ -1945,6 +2051,298 @@ class SummaryExtractor:
   def get_description(self):
     return self._description
 
+  def _plot_noise_level_histogram(self, replica_id=-1, simulation_num=0):
+
+    if replica_id == -1:
+      _ = self.get_sep_ratio_vs_min_error()
+      replica_id = self._vals['replica_id_min_err_sim_' + str(simulation_num)]
+    
+    #print(sorted(list(histogram.items()), key=lambda x: x[0]))
+    
+    x, y = self.get_summary('noise_values',
+                            replica_id=replica_id,
+                            simulation_num=simulation_num)
+    x, steps = self.get_summary('train_steps',
+                                replica_id=replica_id,
+                                simulation_num=simulation_num)
+
+    y = [y[i] for i in range(len(y))
+         if steps[i] > self.get_description()['burn_in_period']]
+
+    plot = Plot()
+    fig, ax = plt.subplots()
+    binwidth = 1
+    weights = np.ones_like(y)/float(len(y))
+    ax.hist(y, rwidth=0.5, weights=weights)
+
+    plot.legend(fig, ax, xlabel='Noise Level', ylabel='Visiting Ratio')
+
+  def _plot_loss_histogram_for_noise_level(self,
+                                           summ_name='validation_loss',
+                                           noise_level=0,
+                                           simulation_num=0,
+                                           epsilon = 0.01,
+                                           bins=60,
+                                           burn_in_period=None,
+                                           transformation=None,
+                                           fitting_distribution=None):
+    """Plots histogram of energy distributions.
+
+    Args:
+      summ_name: One of `validation/train/test_loss/error`.
+      noise_level: Integer of list integers specifying a noise levels
+        to plot.
+      simulation_num: A number of simulation to plot.
+      epsilon: Additional width that added on sides of the plot.
+      bins: A number of bins for historgram.
+      burn_in_period: A step (swap step) from which the energies are
+        started to be taken into account.
+      transformation: A function that takes values `x` energy,
+        applies some mathematical transformation and returns resulted
+        value. E.g. `def foo(x): return np.exp(x)`. Default is
+        identity.
+      fitting_distribution: A fitting function for
+        `seaborn.distplot()` in addition to default KDE curve.
+    """
+    def identity(x): return x
+    noise_list = sorted(self.get_description()['noise_list'])
+    n_replicas = self.get_description()['n_replicas']
+    if transformation is None:
+      transform_foo = identity
+    else:
+      transform_foo = transformation
+    
+
+    noise_vals = {i:self.get_summary('noise_values', i, simulation_num)[1]
+                  for i in range(n_replicas)}
+
+    loss_vals = {i:self.get_summary(summ_name, i, simulation_num)[1]
+                 for i in range(n_replicas)}
+
+    _, steps = self.get_summary('_'.join([summ_name.split('_')[0], 'steps']),
+                                replica_id=0,
+                                simulation_num=simulation_num)
+
+    if burn_in_period is None:
+      if self.get_description()['burn_in_period'] == np.inf:
+        burn_in_period = steps[len(steps)//4]
+      else:
+        burn_in_period = self.get_description()['burn_in_period']
+
+    if not isinstance(noise_level, list):
+      noise_levels = [noise_level]
+
+    else:
+      noise_levels = noise_level
+    
+    fig, ax = plt.subplots()
+    plot = Plot()
+    min_loss_val = 1000
+    max_loss_val = -1
+    means = []
+    stddevs = []
+    for noise_level in noise_levels:
+      noise_level_loss = []
+      for i in range(len(steps)):
+        if steps[i] < burn_in_period:
+          continue
+        try:
+          curr_noise_dict = {r:noise_vals[r][i] for r in range(n_replicas)}
+        except:
+          break
+
+        beta = [curr_noise_dict[r] for r in range(n_replicas)]
+        beta_rid = [(b, r) for r, b in enumerate(beta)]
+        beta_rid.sort(key=lambda x: x[0])
+        rid = beta_rid[noise_level][1]
+        loss_val = transform_foo(loss_vals[rid][i])
+        min_loss_val = min(loss_val, min_loss_val)
+        max_loss_val = max(loss_val, max_loss_val)
+        noise_level_loss.append(loss_val)
+
+      
+
+      means.append(np.mean(noise_level_loss))
+      stddevs.append(np.std(noise_level_loss))
+      label = 'Noise Level: ' + "{0:.3f}({1})".format(noise_list[noise_level], noise_level)
+      '''
+      Notes on arguments for `seaborn.distplot()`:
+        * kde: kernel density estimation. Non-parametric way to
+          to estimate the probability density function of
+          a random variable. Definition:
+
+      '''
+      seaborn.distplot(noise_level_loss, kde=True,
+        hist=True, norm_hist=True, bins=bins, hist_kws={'edgecolor':'black'},
+        kde_kws={'linewidth':4},
+        label=label, fit=fitting_distribution)
+
+    mean = np.mean(means)
+    stddev = np.mean(stddevs)
+    xlimit = (min(min_loss_val, mean-2*stddev) - epsilon, max(max_loss_val, mean+2*stddev) + epsilon)
+    xlabel='Energy Levels'
+    if transformation is not None:
+        foostr = inspect.getsource(transformation).replace('\n', ';') 
+        xlabel = xlabel + '\nTransformation: ' + foostr     
+    plot.legend(fig, ax, xlabel=xlabel, ylabel='Histogram',
+        xlimit=xlimit)
+    return fig
+
+  def _plot_exchange_proba(self, replica_id=-1, simulation_num=0, proba_coeff=None,
+      isnormalized=True):
+    """Plots probability of chaging noise at swap step for `replica_id`."""
+
+    def get_lower_and_upper_rids(rid, curr_noise_dict):
+      beta = [curr_noise_dict[r] for r in range(n_replicas)]
+      beta_rid = [(b, r) for r, b in enumerate(beta)]
+      reverse = (True if noise_type in ['weight_noise', 'langevin'] else False)
+      beta_rid.sort(key=lambda x: x[0], reverse=reverse)
+      rid_level = [i for i in range(len(beta_rid)) if beta_rid[i][1] == rid][0]
+      if rid_level == n_replicas - 1:
+        hrid = -1
+      else:
+        hrid = beta_rid[rid_level+1][1]
+
+      if rid_level == 0:
+        lrid = -1
+      else:
+        lrid = beta_rid[rid_level-1][1]
+
+      return lrid, hrid
+    
+
+    if replica_id == -1:
+      _ = self.get_sep_ratio_vs_min_error()
+      replica_id = self._vals['replica_id_min_err_sim_' + str(simulation_num)]
+
+
+    noise_list = sorted(self.get_description()['noise_list'])
+    n_replicas = self.get_description()['n_replicas']
+    noise_type = self.get_description()['noise_type']
+    if proba_coeff is None:
+      proba_coeff = self.get_description()['proba_coeff']
+    n_epochs = self.get_description()['n_epochs']
+
+    rid = replica_id
+
+    noise_vals = {i:self.get_summary('noise_values', i, simulation_num)[1]
+                  for i in range(n_replicas)}
+
+    loss_vals = {i:self.get_summary('validation_loss', i, simulation_num)[1]
+                 for i in range(n_replicas)}
+
+    tolower_probas = []
+    tohigher_probas = []
+    tostay_probas = []
+    endidx = len(loss_vals[0])
+
+
+    for step in range(endidx):
+      try:
+        curr_noise_dict = {r:noise_vals[r][step] for r in range(n_replicas)}
+        curr_loss_dict = {r:loss_vals[r][step] for r in range(n_replicas)}
+      except IndexError:
+        break
+        print('step:', step)
+        print('noise:')
+        for r, v in noise_vals.items():
+          print('rid:', r, 'len:', len(v))
+        print('loss:')
+        for r, v in loss_vals.items():
+          print('rid:', r, 'len:', len(v))
+        raise
+      lrid, hrid = get_lower_and_upper_rids(rid, curr_noise_dict)
+      if lrid == -1:
+        proba_lower = 0.0
+        tolower_probas.append(proba_lower)
+      else:
+        li = curr_loss_dict[lrid]
+        lj = curr_loss_dict[rid]
+        bi = curr_noise_dict[lrid]
+        bj = curr_noise_dict[rid]
+        proba_lower = np.exp(proba_coeff*(li - lj)*(bi - bj))
+        proba_lower = min(proba_lower, 1.0)
+        if isnormalized:
+          proba_lower *= (1/(n_replicas - 1))
+        tolower_probas.append(proba_lower)
+
+      if hrid == -1:
+        proba_higher = 0.0
+        tohigher_probas.append(proba_higher)
+      else:
+        li = curr_loss_dict[rid]
+        lj = curr_loss_dict[hrid]
+        bi = curr_noise_dict[rid]
+        bj = curr_noise_dict[hrid]
+        proba_higher = np.exp(proba_coeff*(li - lj)*(bi - bj))
+        proba_higher = min(1.0, proba_higher)
+        if isnormalized:
+          proba_higher *= (1/(n_replicas-1))
+        tohigher_probas.append(proba_higher)
+
+      proba_stay = max(0.0, 1.0 - proba_lower - proba_higher)
+      tostay_probas.append(proba_stay)
+
+    fig, ax = plt.subplots()
+    plot = Plot()
+
+    x = np.linspace(0, n_epochs, len(tostay_probas))
+
+    if isnormalized:
+      plot.plot(x, tostay_probas, fig=fig, ax=ax, label='NEXT_NOISE to CURR_NOISE')
+    plot.plot(x, tohigher_probas, fig=fig, ax=ax, label='NEXT_NOISE to HIGHER_NOISE')
+    plot.plot(x, tolower_probas, fig=fig, ax=ax, label='NEXT_NOISE to LOWER_NOISE')
+    plot.legend(fig, ax, xlabel='EPOCHS', ylabel='PROBABILITY')
+
+    return fig
+
+  def _plot_test_err_vs_noise_level_vs_epochs(self, replica_id=-1, simulation_num=0):
+
+    if replica_id == -1:
+      _ = self.get_sep_ratio_vs_min_error()
+      replica_id = self._vals['replica_id_min_err_sim_' + str(simulation_num)]
+
+    x_noise, noise_vals = self.get_summary('noise_values',
+                                            replica_id=replica_id,
+                                            simulation_num=simulation_num)
+    
+    x_err, err_vals = self.get_summary('test_error',
+                                       replica_id=replica_id,
+                                       simulation_num=simulation_num)
+
+    x_diff, diff = self.get_summary('diffusion',
+                                    replica_id=replica_id,
+                                    simulation_num=simulation_num)
+    diff = np.asarray(diff)
+
+    x_train_steps, train_steps = self.get_summary('train_steps',
+                                                  replica_id=replica_id,
+                                                  simulation_num=simulation_num)
+
+    x_test_steps, test_steps = self.get_summary('test_steps',
+                                                replica_id=replica_id,
+                                                simulation_num=simulation_num)
+
+
+
+    fig = plt.figure()
+    fig.set_size_inches(18, 10)
+
+    ax = fig.gca(projection='3d')
+
+    epsilon = 0.005
+    ax.plot(x_noise, noise_vals, np.zeros_like(noise_vals), linewidth=1, label='Noise Level')
+    ax.plot(x_err, (max(noise_vals) + epsilon)*np.ones_like(err_vals), err_vals, linewidth=1, label='Error')
+    ax.plot(x_diff, (max(noise_vals) + 5*epsilon)*np.ones_like(x_diff), diff/diff.max(), label='Diffusion')
+    ax.set_zlabel('Error and Normalized Diffusion')
+    plt.xlabel('Epochs')
+    plt.ylabel('Noise Level')
+    ax.view_init(20, 270)
+    
+    plt.ylim(min(noise_vals) - epsilon, max(noise_vals) + 6*epsilon)
+    plt.legend()
+
+
   def _plot_norms(self, simulation_num=0):
     fig, ax = plt.subplots()
     plot = Plot()
@@ -2006,7 +2404,7 @@ class SummaryExtractor:
 
 
     fig = plt.figure()
-    fig.set_size_inches(20, 10)
+    fig.set_size_inches(18, 10)
 
     ax = fig.gca(projection='3d')
     
@@ -2074,7 +2472,7 @@ class SummaryExtractor:
 
 
     fig = plt.figure()
-    fig.set_size_inches(20, 10)
+    fig.set_size_inches(18, 10)
 
     ax = fig.gca(projection='3d')
     
@@ -2141,7 +2539,7 @@ class SummaryExtractor:
     y_gap = np.asarray(result['test']) - np.asarray(result['train'])
 
     fig = plt.figure()
-    fig.set_size_inches(20, 10)
+    fig.set_size_inches(18, 10)
 
     ax = fig.gca(projection='3d')
     
@@ -2163,7 +2561,6 @@ class SummaryExtractor:
     plt.ylim(min(0, min(y_gap)), ylim[1])
     ax.set_zlabel('Diffusion')
     plt.legend()
-
 
   def _plot_train_test_loss_gap(self, simulation_num=0, sample_every=1, ylim=(0, 5)):
 
@@ -2200,7 +2597,7 @@ class SummaryExtractor:
     y_gap = np.asarray(result['test']) - np.asarray(result['train'])
 
     fig = plt.figure()
-    fig.set_size_inches(20, 10)
+    fig.set_size_inches(18, 10)
 
     ax = fig.gca(projection='3d')
     
@@ -2300,8 +2697,7 @@ class SummaryExtractor:
       plot.plot(x, y_new, fig=fig, ax=ax, label='replica ' + str(r),
                 linewidth=2)
     yticks_names = [float("{0:.5f}".format(b)) for b in noise_list]
-    #print(yticks_names)
-    #print(noise_list)
+
     plt.gca().set_yticklabels(['0'] + yticks_names)
     plot.legend(fig, ax, legend_title='ReplicaID',
                 xlabel='EPOCHS', ylabel='NOISE LEVEL')

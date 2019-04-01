@@ -9,11 +9,15 @@ class Lenet5(nn.Module):
         nn.Conv2d(in_channels=3,
                   out_channels=6,
                   kernel_size=5,
-                  padding=1,
+                  padding=0,
                   bias=True),
         nn.ReLU(),
         nn.MaxPool2d(2))
+    nn.init.xavier_uniform_(self.conv1[0].weight)
+    nn.init.zeros_(self.conv1[0].bias)
+    
     self.dropout1 = nn.Dropout(p=dropout_rate)
+    
     self.conv2 = nn.Sequential(
         nn.Conv2d(in_channels=6,
                   out_channels=12,
@@ -21,8 +25,14 @@ class Lenet5(nn.Module):
                   bias=True),
         nn.ReLU(),
         nn.MaxPool2d(2))
+    nn.init.xavier_uniform_(self.conv2[0].weight)
+    nn.init.zeros_(self.conv2[0].bias)
+    
     self.dropout2 = nn.Dropout(p=dropout_rate)
+    
     self.logits = nn.Linear(432, 10)
+    nn.init.xavier_uniform_(self.logits.weight)
+    nn.init.zeros_(self.logits.bias)
 
 
   def get_n_trainable_params(self):

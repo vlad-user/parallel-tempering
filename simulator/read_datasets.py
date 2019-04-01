@@ -4,9 +4,11 @@ import tarfile
 import random
 import sys
 from six.moves import urllib
+import pickle
 
 import numpy as np
 from sklearn.model_selection import train_test_split
+from sklearn.utils import shuffle as shuffle_dataset
 import tensorflow as tf
 
 class Cifar10: # pylint: disable=too-many-instance-attributes, too-few-public-methods, missing-docstring
@@ -33,7 +35,6 @@ class Cifar10: # pylint: disable=too-many-instance-attributes, too-few-public-me
       return res
     """
     # PYTHON 3.x.x
-    import pickle
     def unpickle(file):
       with open(file, 'rb') as file_:
         unpick = pickle._Unpickler(file_) # pylint: disable=protected-access
@@ -100,17 +101,60 @@ class Cifar10: # pylint: disable=too-many-instance-attributes, too-few-public-me
 
 def get_cifar10_data(validation_size=0.5, random_state=None):
   """Returns cifar10 data. If not on disk, downloads."""
-  cif = Cifar10()
-  X_test, y_test = cif.test_data, cif.test_labels # pylint: disable=invalid-name
-
-  X_test, X_valid, y_test, y_valid = train_test_split( # pylint: disable=invalid-name
-      X_test,
+  # cif = Cifar10()
+  # X_test, y_test = cif.test_data, cif.test_labels # pylint: disable=invalid-name
+  (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
+  x_test, x_valid, y_test, y_valid = train_test_split( # pylint: disable=invalid-name
+      x_test,
       y_test, test_size=validation_size,
       random_state=(random_state
                     if random_state is not None else random.randint(1, 42)))
-  X_train = cif.train_data
-  y_train = cif.train_labels
-  return X_train/255, y_train, X_test/255, y_test, X_valid/255, y_valid
+  #X_train = cif.train_data
+  #y_train = cif.train_labels
+  y_train, y_test, y_valid = (y_train.flatten(),
+                              y_test.flatten(),
+                              y_valid.flatten())
+  return x_train/255, y_train, x_test/255, y_test, x_valid/255, y_valid
+
+def get_cifar10_data_debug(train_data_size=4000, replace_existing=False):
+  """Creates (if not exists) and returns cifar data for debug."""
+
+  dirname = os.path.join(os.path.dirname(__file__), 'data', 'debug_cifar10')
+  if not os.path.exists(dirname):
+    os.makedirs(dirname)
+  fname = os.path.join(dirname, 'data.pkl')
+  
+  if not os.path.exists(fname) or replace_existing:
+    x_train, y_train, x_test, y_test, x_valid, y_valid = (
+        get_cifar10_data())
+
+    x_train, y_train = shuffle_dataset(x_train, y_train)
+    x_train, y_train = x_train[:train_data_size], y_train[:train_data_size]
+
+    data = {
+      'x_train': x_train,
+      'y_train': y_train,
+      'x_test': x_test,
+      'y_test': y_test,
+      'x_valid': x_valid,
+      'y_valid': y_valid
+    }
+    with open(fname, 'wb') as fo:
+      pickle.dump(data, fo, protocol=pickle.HIGHEST_PROTOCOL)
+
+  with open(fname, 'rb') as fo:
+    data = pickle.load(fo)
+
+    x_train = data['x_train']
+    y_train = data['y_train']
+    x_test = data['x_test']
+    y_test = data['y_test']
+    x_valid = data['x_valid']
+    y_valid = data['y_valid']
+
+  return x_train, y_train, x_test, y_test, x_valid, y_valid
+
+
 
 def get_fashion_mnist_data(validation_size=0.1, random_state=None, flatten=True):
   """Returns fashion mnist dataset. If not on disk, downloads."""

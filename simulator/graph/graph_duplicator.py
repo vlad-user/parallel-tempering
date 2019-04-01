@@ -25,7 +25,7 @@ def random_uniform(interval1=(0.8, 1.2), interval2=(-1.2, -0.8)):
 
 def copy_and_duplicate( # pylint: disable=too-many-arguments, invalid-name
     X, y, is_train, logits, n_duplicates, dst_graph,
-    dropout_placeholder=None, namespace='Layers_'):
+    noise_type, dropout_placeholder=None, namespace='Layers_'):
   """Duplicates a graph `n_duplicates` times.
 
   A `dst_graph` will contain the duplicates of the net, except that
@@ -52,6 +52,9 @@ def copy_and_duplicate( # pylint: disable=too-many-arguments, invalid-name
   X_copy = copy_to_graph(X, dst_graph, namespace='') # pylint: disable=invalid-name
   y_copy = copy_to_graph(y, dst_graph, namespace='') # pylint: disable=invalid-name
   is_train_copy = copy_to_graph(is_train, dst_graph, namespace='')
+  if noise_type in ['learning_rate']:
+    _ = [copy_to_graph(dropout_placeholder, dst_graph, namespace=namespace+str(i))
+         for i in range(n_duplicates)]
 
   for i in range(n_duplicates):
     _ = [copy_variable_to_graph(v, dst_graph, namespace=namespace+str(i))

@@ -8,9 +8,11 @@ import pickle
 
 import numpy as np
 import torch
+from torch.utils.data import dataset
 
 from simulator.testing import models
 from simulator.read_datasets import get_cifar10_data
+from simulator.read_datasets import get_cifar10_data_debug
 
 FNAME_PREFIX = 'summary_'
 FNAME_SUFFIX = '.log'
@@ -28,7 +30,7 @@ def compute_accuracy(y_pred, y):
   return sum(result) / len(result)
 
 def compute_zero_one_error(y_pred, y):
-    return 1.0 - compute_accuracy(y_pred.to('cpu'), y.type(torch.LongTensor).to('cpu'))
+  return 1.0 - compute_accuracy(y_pred.to('cpu'), y.type(torch.LongTensor).to('cpu'))
 
 
 def train_cifar(Model,
@@ -42,19 +44,20 @@ def train_cifar(Model,
                 noise_list=None,
                 burn_in_period=2000,
                 train_data_size=5000,
-                ):
+                debug=False,
+                replace_existing=False):
   ######################################################
   def run_test_epoch(model, pytorch_loss, loader):
     errs, losses = [], []
     for (x, y) in loader:
-        x, y = x.type(torch.FloatTensor), y.type(torch.FloatTensor)
-        x, y = x.to(DEVICE), y.to(DEVICE)
-        y_pred = model(x)
-        loss_val = pytorch_loss(y_pred.type(torch.FloatTensor), y.type(torch.LongTensor))
-        vals, y_pred = torch.max(y_pred, 1)
-        error = compute_zero_one_error(y_pred, y)
-        losses.append(loss_val.item())
-        errs.append(error)
+      x, y = x.type(torch.FloatTensor), y.type(torch.FloatTensor)
+      x, y = x.to(DEVICE), y.to(DEVICE)
+      y_pred = model(x)
+      loss_val = pytorch_loss(y_pred.type(torch.FloatTensor), y.type(torch.LongTensor))
+      vals, y_pred = torch.max(y_pred, 1)
+      error = compute_zero_one_error(y_pred, y)
+      losses.append(loss_val.item())
+      errs.append(error)
 
     loss = np.mean(losses)
     error = np.mean(errs)
@@ -64,9 +67,22 @@ def train_cifar(Model,
   ######################################################
 
   ######################################################
-  train_loader = torch.utils.data.DataLoader(CifarTrainDataset(train_data_size), batch_size=batch_size)
-  test_loader = torch.utils.data.DataLoader(CifarTestDataset(), batch_size=batch_size)
-  valid_loader = torch.utils.data.DataLoader(CifarValidationDataset(), batch_size=batch_size)
+  if debug:
+    x_train, y_train, x_test, y_test, x_valid, y_valid = get_cifar10_data_debug(
+        train_data_size=train_data_size, replace_existing=replace_existing)
+  else:
+    x_train, y_train, x_test, y_test, x_valid, y_valid = get_cifar10_data()
+
+  x_train, x_test, x_valid = (np.reshape(x_train, [x_train.shape[0], 3, 32, 32]),
+                              np.reshape(x_test, [x_test.shape[0], 3, 32, 32]),
+                              np.reshape(x_valid, [x_valid.shape[0], 3, 32, 32]))
+
+  train_loader = torch.utils.data.DataLoader(Dataset(x_train, y_train),
+                                             batch_size=batch_size)
+  test_loader = torch.utils.data.DataLoader(Dataset(x_test, y_test),
+                                            batch_size=batch_size)
+  valid_loader = torch.utils.data.DataLoader(Dataset(x_valid, y_valid),
+                                             batch_size=batch_size)
 
   ######################################################
   n_replicas = len(noise_list)
@@ -210,7 +226,7 @@ def train_cifar(Model,
           summary._train_steps.append(step)
           summary._valid_steps.append(step)
           batch_logs = {'loss':{i:[] for i in range(n_replicas)},
-                    'error':{i:[] for i in range(n_replicas)}}
+                        'error':{i:[] for i in range(n_replicas)}}
 
         if epoch % 200 == 0:
           summary._epoch = epoch + 1
@@ -307,60 +323,18 @@ class Summary:
       with open(self._logfile_name, 'wb', os.O_NONBLOCK) as fo:
         pickle.dump(log_data, fo, protocol=pickle.HIGHEST_PROTOCOL)
 
-from torch.utils.data.dataset import Dataset
-class CifarDataset(Dataset):
 
-  def __init__(self, train_data_size=7000):
-    self.train_data_size = 7000
+class Dataset(dataset.Dataset):
+    def __init__(self, data, labels):
+        self.data = data
+        self.labels = labels
+    
+    def __getitem__(self, index):
+        return (self.data[index], self.labels[index])
+    
+    def __len__(self):
+        return self.data.shape[0]
 
-    x_train, y_train, x_test, y_test, x_valid, y_valid = get_cifar10_data()
-    x_train = np.reshape(x_train, (x_train.shape[0], 3, 32, 32))
-    x_test = np.reshape(x_test, (x_test.shape[0], 3, 32, 32))
-    x_valid = np.reshape(x_valid, (x_test.shape[0], 3, 32, 32))
-    data_size = min(self.train_data_size, x_train.shape[0])
-
-    self.x_train = x_train[:data_size]
-    self.y_train = y_train[:data_size]
-    self.x_test = x_test
-    self.y_test = y_test
-    self.x_valid = x_valid
-    self.y_valid = y_valid
-
-class CifarTrainDataset(CifarDataset):
-
-  def __init__(self, train_data_size=5000):
-    super(CifarTrainDataset, self).__init__(train_data_size)
-
-
-  def __getitem__(self, index):
-    return (self.x_train[index], self.y_train[index])
-
-  def __len__(self):
-    return self.x_train.shape[0]
-
-class CifarTestDataset(CifarDataset):
-
-  def __init__(self):
-    super(CifarTestDataset, self).__init__()
-
-
-  def __getitem__(self, index):
-    return (self.x_test[index], self.y_test[index])
-
-  def __len__(self):
-    return self.x_test.shape[0]
-
-class CifarValidationDataset(CifarDataset):
-
-  def __init__(self):
-    super(CifarValidationDataset, self).__init__()
-
-
-  def __getitem__(self, index):
-    return (self.x_valid[index], self.y_valid[index])
-
-  def __len__(self):
-    return self.x_valid.shape[0]
 
 
 def print_log(dict_):

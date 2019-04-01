@@ -5,10 +5,11 @@ import tensorflow as tf
 import numpy as np
 
 from simulator.graph.graph_duplicator import copy_and_duplicate
-from simulator.graph.optimizers import GDOptimizer_v2 as GDOptimizer
+from simulator.graph.optimizers import GDOptimizer
 from simulator.graph.optimizers import NormalNoiseGDOptimizer
 from simulator.graph.optimizers import GDLDOptimizer
 from simulator.graph.optimizers import RMSPropOptimizer
+from simulator.graph.optimizers import _get_dependencies
 from simulator.graph.summary import Summary
 from simulator.exceptions import InvalidDatasetTypeError
 from simulator.exceptions import InvalidModelFuncError
@@ -25,6 +26,10 @@ class SimulatorGraph:
   exchanges between two ensembles and storing the summary
   values. It is used to train models in the
   Parallel Tempering framework.
+  
+  ##Notes on `noise_type`s:
+  * `l2_regularizer_with_dropout` applies dropout both on hidden
+    units and on squared trainable variables.
 
   # Example:
   ```python
@@ -71,10 +76,11 @@ class SimulatorGraph:
   """
 
   def __init__(self, model, learning_rate, noise_list, name,
-               ensembles=None, noise_type='random_normal',
+               ensembles=None, noise_type='weight_noise',
                simulation_num=None, loss_func_name='cross_entropy',
-               proba_coeff=1.0, rmsprop_decay=0.9,
-               rmsprop_momentum=0.0, rmsprop_epsilon=1e-10):
+               proba_coeff=1.0, hessian=False, lambda_=0.01,
+               rmsprop_decay=0.9, rmsprop_momentum=0.0,
+               rmsprop_epsilon=1e-10):
     """Instantiates a new SimulatorGraph object.
 
     Args:
@@ -116,6 +122,13 @@ class SimulatorGraph:
       proba_coeff: The coeffecient is used in calculation of
         probability of swaps. Specifically, we have
         P(accept_swap) = exp(proba_coeff*(beta_1-beta_2)(E_1-E_2))
+      hessian: (Boolean) If `True`, computes Hessian and its
+        eigenvalues during each swap step. Default is `False` since
+        it is computationally intensive and should be used only for
+        small networks. **Not implemented**.
+      lambda_: In case of `l2_regularizer_with_dropout`, the constant
+        regularization parameter is applied for every replica. For
+        other noise types, this value is ignored.
       rmsprop_decay: Used in
         simulator.graph.optimizers.RMSPropOptimizer
         for noise type 'dropout_rmsprop'. This value is ignored for
@@ -130,12 +143,16 @@ class SimulatorGraph:
         other `noise_types`.
     """
 
-    self._noise_types = ['random_normal',
+    self._noise_types = ['weight_noise',
                          'langevin',
                          'dropout',
                          'dropout_rmsprop',
                          'dropout_gd',
-                         'gd_no_noise'] # possible noise types
+                         'gd_no_noise',
+                         'l2_regularizer',
+                         'l2_regularizer_with_dropout',
+                         'input_noise',
+                         'learning_rate'] # possible noise types
 
     if not isinstance(noise_list, list) or not noise_list:
       raise ValueError("Invalid `noise_list`. Should be non-empty python list.")
@@ -152,6 +169,8 @@ class SimulatorGraph:
     self._swap_attempts = 0
     self._swap_successes = 0
     self._accept_ratio = 0
+    self._hessian = hessian
+    self._lambda = lambda_
 
     # create graph with duplicated ensembles based on the provided
     # model function and noise type
@@ -182,10 +201,14 @@ class SimulatorGraph:
           self._n_params = np.sum([np.prod(v.get_shape().as_list()) for v in tf.trainable_variables()])
 
         if (len(res) == 4 and
-            noise_type in ['random_normal', 'langevin', 'gd_no_noise']):
+            noise_type in ['weight_noise',
+                           'langevin',
+                           'gd_no_noise',
+                           'l2_regularizer',]):
           X, y, is_train, logits = res
+
           self.X, self.y, self.is_train, logits_list = copy_and_duplicate(
-              X, y, is_train, logits, self._n_replicas, self._graph)
+              X, y, is_train, logits, self._n_replicas, self._graph, self._noise_type)
 
           # _noise_plcholders will be used to store noise vals for summaries
           with self._graph.as_default():
@@ -193,10 +216,16 @@ class SimulatorGraph:
                                       for i in range(self._n_replicas)}
 
         elif (len(res) == 5
-              and noise_type in ['dropout', 'dropout_rmsprop', 'dropout_gd']):
+              and noise_type in ['dropout',
+                                 'dropout_rmsprop',
+                                 'dropout_gd',
+                                 'l2_regularizer_with_dropout',
+                                 'input_noise',
+                                 'learning_rate']):
           X, y, is_train, prob_placeholder, logits = res
+
           self.X, self.y, self.is_train, probs, logits_list = copy_and_duplicate(
-              X, y, is_train, logits, self._n_replicas, self._graph,
+              X, y, is_train, logits, self._n_replicas, self._graph, self._noise_type,
               prob_placeholder)
 
           # _noise_plcholders stores dropout plcholders: {replica_id:plcholder}
@@ -213,7 +242,7 @@ class SimulatorGraph:
         raise Exception("Problem with inference model function.") from exc
 
     # curr_noise_dict stores {replica_id:current noise stddev VALUE}
-    # If noise type is langevin or random_normal it will store beta
+    # If noise type is langevin or weight_noise it will store beta
     # values. In case of noise_type == dropout, _curr_noise_dict stores
     # probabilities for keeping optimization parameters
     self._curr_noise_dict = {i:n for i, n in enumerate(self._noise_list)}
@@ -239,16 +268,24 @@ class SimulatorGraph:
                          "cross_entropy/stun. But given: ")
               err_msg += self._loss_func_name
               raise ValueError(err_msg)
-            
-            self._loss_dict[i] = loss_func(
-                self.y, logits_list[i])
+            if self._noise_type == 'l2_regularizer_with_dropout':
+              self._loss_dict[i] = loss_func(self.y,
+                                             logits_list[i],
+                                             regularizer=self._noise_type,
+                                             lambda_=self._lambda,
+                                             keep_prob=self._self._noise_plcholders[i])
+            else:
+              self._loss_dict[i] = loss_func(self.y,
+                                             logits_list[i],
+                                             regularizer=self._noise_type,
+                                             lambda_=self._noise_plcholders[i])
           # on cpu
           self._error_dict[i] = self._error(
               self.y, logits_list[i])
 
         with tf.name_scope('Optimizer_' + str(i)):
 
-          if noise_type.lower() == 'random_normal':
+          if noise_type.lower() == 'weight_noise':
             optimizer = NormalNoiseGDOptimizer(
                 self._learning_rate, i, self._noise_list)
 
@@ -262,9 +299,17 @@ class SimulatorGraph:
                 decay=rmsprop_decay, momentum=rmsprop_momentum,
                 epsilon=rmsprop_epsilon)
 
-          elif noise_type.lower() in ['dropout_gd', 'dropout', 'gd_no_noise']:
+          elif noise_type.lower() in ['dropout_gd',
+                                      'dropout',
+                                      'gd_no_noise',
+                                      'l2_regularizer',
+                                      'input_noise']:
             optimizer = GDOptimizer(
                 self._learning_rate, i, self._noise_list)
+
+          elif noise_type.lower() in ['learning_rate']:
+            optimizer = GDOptimizer(
+                self._noise_plcholders[i], i, self._noise_list)
 
           else:
             raise InvalidNoiseTypeError(noise_type, self._noise_types)
@@ -274,7 +319,9 @@ class SimulatorGraph:
 
       self._summary = Summary(self._name,
                               self._optimizer_dict,
-                              simulation_num)
+                              self._loss_dict,
+                              simulation_num,
+                              hessian=self._hessian)
 
       self.variable_initializer = tf.global_variables_initializer()
 
@@ -307,12 +354,17 @@ class SimulatorGraph:
     """
 
     feed_dict = {self.X:X_batch, self.y:y_batch}
-
+    
     if dataset_type in ['test', 'validation'] and 'dropout' in self._noise_type:
       dict_ = {self._noise_plcholders[i]:1.0
                for i in range(self._n_replicas)}
 
-    elif dataset_type == 'train' and 'dropout' in self._noise_type:
+    elif dataset_type in ['test', 'validation'] and 'input_noise' == self._noise_type:
+      dict_ = {self._noise_plcholders[i]:0.0
+               for i in range(self._n_replicas)}
+    
+    elif ((dataset_type in ['train'] and 'dropout' in self._noise_type)
+          or self._noise_type in ['l2_regularizer', 'input_noise', 'learning_rate']):
       dict_ = {self._noise_plcholders[i]:self._curr_noise_dict[i]
                for i in range(self._n_replicas)}
 
@@ -329,6 +381,17 @@ class SimulatorGraph:
       feed_dict.update({self.is_train:False})
     return feed_dict
 
+  def get_hessian_eigenvalues_ops(self):
+    
+    raise NotImplementedError()
+    if self._hessian == False:
+      err_msg = ("`hessian` argument was set to `False` during "
+                 "initialization of this instance. To use the function "
+                 "set `hessian=True`.")
+      raise ValueError(err_msg)
+
+    return [self._summary._hess_eigenval_ops[i] for i in range(self._n_replicas)]
+
   def get_train_ops(self, dataset_type='train', loss_err=True, special_ops=False):
     """Returns train ops for session's run.
 
@@ -337,8 +400,7 @@ class SimulatorGraph:
 
     Args:
       dataset_type: One of 'train'/'test'/'validation'
-      special_ops: If `True`, adds diffusion, gradients and weight's
-        norms ops.
+      special_ops: If `True`, adds diffusion.
 
     Returns:
       A list of train ops.
@@ -487,7 +549,7 @@ class SimulatorGraph:
 
     beta = [self._curr_noise_dict[x] for x in range(self._n_replicas)]
     beta_id = [(b, i) for i, b in enumerate(beta)]
-    reverse = (True if self._noise_type in ['random_normal', 'langevin'] else False)
+    reverse = (True if self._noise_type in ['weight_noise', 'langevin'] else False)
     beta_id.sort(key=lambda x: x[0], reverse=reverse)
 
     i = beta_id[random_pair][1]
@@ -536,12 +598,45 @@ class SimulatorGraph:
     """Stores tensorflow graph."""
     tf.summary.FileWriter(path, self._graph).close()
 
-  def _cross_entropy_loss(self, y, logits, clip_value_max=2000.0): # pylint: disable=invalid-name, no-self-use
-    """Cross entropy."""
+  def _cross_entropy_loss(self, y, logits, clip_value_max=2000.0,
+                          regularizer=None, lambda_=None,
+                          keep_prob=None): # pylint: disable=invalid-name, no-self-use
+    """Cross entropy (possibly) with regularization.
+    
+    Args:
+      y: A placeholder for labels.
+      logits: A logits layer of the model.
+      clip_by_value: A maximum value of that is possible for loss.
+      regularizer: If 'l2_regularizer' a L2-norm regularization
+        multiplied by coefficient `lambda_`. If `None`, doesn't add
+        regularization to the loss function.
+      lambda_: `Placeholder` or `float` - regularization parameter.
+
+    Returns:
+      A `Tensor` cross entropy loss.
+    """
     with tf.name_scope('cross_entropy'):
       cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
           labels=y, logits=logits)
       loss = tf.reduce_mean(cross_entropy, name='cross_entropy')
+      
+
+      if regularizer == 'l2_regularizer_with_dropout':
+        raise NotImplementedError()
+        if keep_prob is None:
+          raise ValueError("For {} the keep_prob must be provided".format(regularizer))
+
+        vars_ = _get_dependencies(loss)
+        flatten_vars = [tf.reshape(v, [-1]) for v in vars_]
+        concat_vars = tf.concat(flatten_vars, axis=0)
+        vars_with_dropout = tf.nn.droput(concat_vars, keep_prob=keep_prob)
+        loss = loss + lambda_*tf.nn.l2_loss(vars_with_dropout)
+
+      elif regularizer == 'l2_regularizer':
+        vars_ = _get_dependencies(loss)
+        l2_vars = [tf.nn.l2_loss(v) for v in vars_]
+        loss = loss + lambda_*tf.reduce_sum(l2_vars)
+
       if clip_value_max is not None:
         loss = tf.clip_by_value(loss, 0.0, clip_value_max)
     return loss
@@ -550,11 +645,18 @@ class SimulatorGraph:
     """0-1 error."""
     with tf.name_scope('error'):
         # input arg `predictions` to tf.nn.in_top_k must be of type tf.float32
+      
       y_pred = tf.nn.in_top_k(predictions=tf.cast(logits, tf.float32),
                               targets=y,
                               k=1)
       error = 1.0 - tf.reduce_mean(tf.cast(x=y_pred, dtype=DTYPE),
                                    name='error')
+      '''
+      softmax = tf.nn.softmax(logits)
+      pred = tf.argmax(softmax, 1)
+      equals = tf.equal(tf.cast(pred, tf.int32), y)
+      error = 1.0 - tf.reduce_mean(tf.cast(equals, tf.float32))
+      '''
     return error
 
   def _stun_loss(self, loss, gamma=1): # pylint: disable=no-self-use
@@ -564,5 +666,6 @@ class SimulatorGraph:
       stun = 1 - tf.exp(-gamma*loss) # pylint: disable=no-member
 
     return stun
+
 
   

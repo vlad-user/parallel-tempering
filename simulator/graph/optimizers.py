@@ -37,11 +37,12 @@ class Optimizer:
     grads_and_vars = self.compute_gradients(loss)
     train_op = self.apply_gradients(grads_and_vars)
     self.train_op = train_op # pylint: disable=attribute-defined-outside-init
+    self.trainable_variables = _get_dependencies(loss)
     return train_op
 
   def compute_gradients(self, loss):
     """Wrapper for tf.train.Optimizer.minimize()"""
-    var_list = self._get_dependencies(loss)
+    var_list = _get_dependencies(loss)
     with tf.device(_gpu_device_name(self.replica_id)):
       grads_and_vars = self.tf_optimizer.compute_gradients(loss, var_list)
     return grads_and_vars
@@ -56,6 +57,9 @@ class Optimizer:
     Returns:
       An op for gradient computation.
     """
+    with tf.device(_gpu_device_name(self.replica_id)):
+      return self.tf_optimizer.apply_gradients(grads_and_vars)
+
     with tf.device(_gpu_device_name(self.replica_id)):
       ops_ = [tf.assign(v, v - self.learning_rate*g)
               for g, v in grads_and_vars]
@@ -111,6 +115,7 @@ class NormalNoiseGDOptimizer(Optimizer):
     self._grads = []
 
   def minimize(self, loss):
+    self.trainable_variables = _get_dependencies(loss)
     grads_and_vars = self.compute_gradients(loss)
     for route, stddev in enumerate(self.noise_list):
       with tf.name_scope('Route_' + str(route)):
@@ -125,7 +130,7 @@ class NormalNoiseGDOptimizer(Optimizer):
     Args:
       grads_and_vars: list of tuples as returned by
         optimizer.compute_gradients()
-      stddev:     standard deviation of normal noise
+      stddev: standard deviation of normal noise
 
     Returns:
       An op for gradient computation.
@@ -202,7 +207,7 @@ class RMSPropOptimizer(Optimizer):
     self._grads = []
 
   def minimize(self, loss):
-    self.trainable_variables = self._get_dependencies(loss) # pylint: disable=attribute-defined-outside-init
+    self.trainable_variables = _get_dependencies(loss) # pylint: disable=attribute-defined-outside-init
     with tf.device(_gpu_device_name(self.replica_id)):
       self.train_op = self.tf_optimizer.minimize(loss, self.trainable_variables)
     
@@ -222,12 +227,11 @@ class GDOptimizer_v2:
     self.learning_rate = learning_rate
     self.replica_id = replica_id
     self.trainable_variables = None
-    self.tf_optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learning_rate,
-                                                          use_locking=True)
+    self.tf_optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learning_rate)
 
   def minimize(self, loss):
 
-    var_list = self._get_dependencies(loss)
+    var_list = _get_dependencies(loss)
     grads_and_vars = self.tf_optimizer.compute_gradients(loss, var_list)
     train_op = self.tf_optimizer.apply_gradients(grads_and_vars)
     #train_op = self.tf_optimizer.minimize(loss, var_list)
@@ -274,3 +278,23 @@ class GDOptimizer_v2:
     pass
 
 
+def _get_dependencies(tensor):
+  """Returns all vars that `tensor` is dependent on."""
+  _dict = {v.op: v for v in tf.trainable_variables()}
+
+  start = tensor.op
+  queue = collections.deque()
+  queue.append(start)
+  visited = set([start])
+  variables = []
+  while queue:
+    op_ = queue.popleft()
+    if op_ in _dict:
+      variables.append(_dict[op_])
+    else:
+      for op_in in op_.inputs:
+        if op_in.op not in visited:
+          queue.append(op_in.op)
+          visited.add(op_in.op)
+
+  return list(reversed(variables))

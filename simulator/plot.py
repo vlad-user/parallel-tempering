@@ -21,9 +21,10 @@ class Plot:
              title=None,
              log_x=None,
              log_y=None,
-             fig_width=10,
+             fig_width=9,
              fig_height=4,
-             ylimit=None):
+             ylimit=None,
+             xlimit=None):
     box = ax.get_position()
     ax.set_position([box.x0, box.y0, box.width*2, box.height*2])
     ax.legend(
@@ -42,6 +43,8 @@ class Plot:
       plt.yscale('log', basey=log_y)
     if ylimit is not None:
       plt.ylim(ylimit[0], ylimit[1])
+    if xlimit is not None:
+      plt.xlim(xlimit[0], xlimit[1])
 
     fig.set_size_inches(fig_width, fig_height) # (width, height)
     self.__first_use = False
@@ -144,3 +147,44 @@ class Plot:
 
 
     return fig
+
+# helper functions to plot different distributions
+import math
+
+def rbf_kernel(x1, x2, alpha, radius, sigma):
+  return (sigma**2)*math.exp(-1 * np.power(abs(x1-x2), alpha) / (2*radius**2))
+
+def plot_gaussian_prior(n_functions=2, kernel=rbf_kernel,
+                        radius=1, mean=0, sigma=2, alpha=2,
+                        range_=(-1, 1), n_points=200,):
+  """Generates functions drawn from Gaussian Process prior.
+
+  Args:
+    n_functions: A number of functions to plot.
+    kernel: A covariance function.
+    radius: A radius of the kernel.
+    range_: A range for `x` axis.
+    sigma: A scaling of the kernel.
+    n_points: A number of points to generate.
+  """
+  xs = np.linspace(range_[0], range_[1], n_points)
+  mean = mean*np.ones_like(xs)
+  gram = gram_matrix(xs, alpha=alpha, radius=radius, sigma=sigma)
+  plt_vals = []
+
+  fig, ax = plt.subplots()
+  plot = Plot()
+  for i in range(n_functions):
+    ys = np.random.multivariate_normal(mean, gram)
+    ys = ys - (ys.min() if ys.min() < 0 else 0)
+    ys = ys/ys.max()
+    plt_vals.append([xs, ys, 'k'])
+
+  for i, x in enumerate(plt_vals):
+    plot.plot(x[0], x[1], fig=fig, ax=ax, label=str(i+1))
+  plot.legend(fig=fig, ax=ax, )
+
+
+
+def gram_matrix(xs, kernel=rbf_kernel, alpha=2, radius=1, sigma=2):
+  return [[kernel(x1,x2, alpha, radius, sigma) for x2 in xs] for x1 in xs]

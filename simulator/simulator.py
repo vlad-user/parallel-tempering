@@ -115,6 +115,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
                proba_coeff=1.0,
                description=None,
                test_batch = None,
+               hessian=False,
                rmsprop_decay=0.9,
                rmsprop_momentum=0.001,
                rmsprop_epsilon=1e-6,
@@ -164,6 +165,10 @@ class Simulator: # pylint: disable=too-many-instance-attributes
       `test_batch`: A size of a data that is fed during evaluation of loss,
         error etc. for test/validation dataset. For MNIST or similar sized
         dataset the whole test/validation data can be fed at once.
+      hessian: (Boolean) If `True`, computes Hessian and its
+        eigenvalues during each swap step. Default is `False` since
+        it is computationally intensive and should be used only for
+        small networks.
       `rmsprop_decay`: Used in
         `simulation.simulation_builder.optimizers.RMSPropOptimizer`
         for noise type `dropout_rmsprop`. This value is ignored for
@@ -201,6 +206,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
     self._tuning_param_name = tuning_parameter_name
     self._description = description
     self._ensembles = ensembles
+    self._hessian = hessian
     self.rmsprop_decay = rmsprop_decay
     self.rmsprop_momentum = rmsprop_momentum
     self.rmsprop_epsilon = rmsprop_epsilon
@@ -247,6 +253,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
                                   simulation_num=i,
                                   loss_func_name=self._loss_func_name,
                                   proba_coeff=self._proba_coeff,
+                                  hessian=self._hessian,
                                   rmsprop_decay=self.rmsprop_decay,
                                   rmsprop_momentum=self.rmsprop_momentum,
                                   rmsprop_epsilon=self.rmsprop_epsilon)
@@ -269,7 +276,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
 
 
   def _parallel_tempering_train(self, **kwargs): # pylint: disable=too-many-locals, invalid-name
-    """Trains and swaps between replicas.
+    """Trains and swaps between replicas while storing summaries.
     
     Args:
       `kwargs`: Should be following keyword arguments: `train_data`,
@@ -388,40 +395,43 @@ class Simulator: # pylint: disable=too-many-instance-attributes
               special_ops = False
 
             batch = sess.run(next_batch)
+
             #if self._noise_type not in ['dropout', 'dropout_gd', 'dropout_rmsprop']:
-            if True:
-              feed_dict = g.create_feed_dict(batch['X'], batch['y'])
-              evaluated = sess.run(g.get_train_ops(),
-                                   feed_dict=feed_dict)
-              if special_ops:
-                ops = g.get_train_ops(special_ops=special_ops, loss_err=False)
-                diff_ops = ops[:g._n_replicas]
-                evaled_diffs = sess.run(diff_ops)
-                evaluated = (evaluated[:2*self._n_replicas]
-                            + evaled_diffs
-                            + evaluated[-self._n_replicas:])
 
+            if special_ops:
+              ops = g.get_train_ops(special_ops=special_ops, loss_err=False)
+              diff_ops = ops[:g._n_replicas]
+              evaled_diffs = sess.run(diff_ops)
 
-              loss = g.extract_evaluated_tensors(evaluated, 'loss')
-              err = g.extract_evaluated_tensors(evaluated, 'error')
+            feed_dict = g.create_feed_dict(batch['X'], batch['y'])
+
+            loss_err_train_ops = g.get_train_ops()
+            loss_err_ops = loss_err_train_ops[:2*self._n_replicas]
+            train_ops = loss_err_train_ops[-self._n_replicas:]
+            loss_err_vals = sess.run(loss_err_ops, feed_dict=feed_dict)
+            train_vals = sess.run(train_ops, feed_dict=feed_dict)
+
+            evaluated = (loss_err_vals
+                        + evaled_diffs
+                        + train_vals)
+            
+            #evaluated = sess.run(g.get_train_ops(),
+            #                     feed_dict=feed_dict)
+            
+            #evaluated = (evaluated[:2*self._n_replicas]
+            #            + evaled_diffs
+            #            + evaluated[-self._n_replicas:])
+
+            if self._hessian:
+                # not implemented
+                hessian_ops = g.get_hessian_eigenvalues_ops()
+                eigenvals = sess.run(hessian_ops,
+                                     feed_dict=feed_dict)
+                g._summary.store_hessian_eigenvals(eigenvals)
               
-            else:
-              # If dropout than evaluate loss, error separately from
-              # evaluation of gradients because dropout drops neurons
 
-              feed_dict = g.create_feed_dict(batch['X'], batch['y'], dataset_type='test')
-              ops = g.get_train_ops(dataset_type='test', special_ops=special_ops)
-
-              loss_err_evaled = sess.run(ops, feed_dict=feed_dict)
-              loss = g.extract_evaluated_tensors(loss_err_evaled, 'loss')
-              err = g.extract_evaluated_tensors(loss_err_evaled, 'error')
-
-              # compute and apply grads
-              feed_dict = g.create_feed_dict(batch['X'], batch['y'], dataset_type='train')
-              ops = g.get_train_ops(loss_err=False)
-              evaluated = sess.run(ops, feed_dict=feed_dict)
-              evaluated = loss_err_evaled + evaluated
-
+            loss = g.extract_evaluated_tensors(evaluated, 'loss')
+            err = g.extract_evaluated_tensors(evaluated, 'error')
 
 
             for i in range(self._n_replicas):
@@ -451,12 +461,12 @@ class Simulator: # pylint: disable=too-many-instance-attributes
           except tf.errors.OutOfRangeError:
             sess.run(iterator.initializer)
             break
-
+    '''
     if not train_batch_loss[0]:
       evaled = [np.mean(train_batch_loss[i]) for i in range(self._n_replicas)]
       evaled += [np.mean(train_batch_err[i]) for i in range(self._n_replicas)]
-      g.add_summary(evaled, step=step, epoch=n_epochs, dataset_type='train')
-
+      g.add_summary(evaled, step=step, epoch=self._n_epochs, dataset_type='train')
+    '''
     g._summary._latest_epoch = self._n_epochs
     g.flush_summary()
 
@@ -516,6 +526,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
                                 simulation_num=0,
                                 loss_func_name=self._loss_func_name,
                                 proba_coeff=self._proba_coeff,
+                                hessian=self._hessian,
                                 rmsprop_decay=self.rmsprop_decay,
                                 rmsprop_momentum=self.rmsprop_momentum,
                                 rmsprop_epsilon=self.rmsprop_epsilon)
