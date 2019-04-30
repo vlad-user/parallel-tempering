@@ -14,7 +14,7 @@ class Plot:
   def legend(self,
              fig,
              ax, # pylint: disable=invalid-name
-             bbox_to_anchor=(1.1, 0.5),
+             bbox_to_anchor=(1, 0.8),
              legend_title='',
              xlabel=None,
              ylabel=None,

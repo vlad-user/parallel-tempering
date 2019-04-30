@@ -73,6 +73,124 @@ def lenet5_with_input_noise(graph):
 
     return x, y, is_train, stddev_ph, logits
 
+def lenet5_lr_with_const_dropout(graph, keep_prob=0.9):
+  with graph.as_default():
+    is_train = tf.placeholder(tf.bool, shape=(), name='is_train')
+    with tf.name_scope('inputs'):
+      x = tf.placeholder(DTYPE, shape=[None, 32*32*3], name='x')
+      x_reshaped = tf.reshape(x, shape=[-1, 32, 32, 3])
+      y = tf.placeholder(tf.int32, shape=[None], name='y')
+      lr = tf.placeholder_with_default(0.001, shape=(), name='learning_rate')
+    with tf.name_scope('conv1'):
+      conv1 = tf.layers.conv2d(x_reshaped,
+                               filters=6,
+                               kernel_size=5,
+                               strides=(1, 1),
+                               padding='VALID',
+                               activation=tf.nn.relu,
+                               kernel_initializer=DEFAULT_INITIALIZER)
+      conv1 = tf.nn.max_pool(value=conv1,
+                             ksize=(1, 2, 2, 1),
+                             strides=(1, 2, 2, 1),
+                             padding='VALID',
+                             name='max_pool1')
+      conv1 = tf.nn.dropout(conv1, keep_prob)
+    with tf.name_scope('conv2'):
+      conv2 = tf.layers.conv2d(conv1,
+                               filters=16,
+                               kernel_size=5,
+                               padding='VALID',
+                               activation=tf.nn.relu,
+                               kernel_initializer=DEFAULT_INITIALIZER)
+      conv2 = tf.nn.max_pool(value=conv2,
+                             ksize=(1, 2, 2, 1),
+                             strides=(1, 2, 2, 1),
+                             padding='VALID',
+                             name='max_pool2')
+      conv2 = tf.nn.dropout(conv2, keep_prob)
+    with tf.name_scope('fc1'):
+      flatten = tf.layers.Flatten()(conv2)
+      fc1 = tf.layers.dense(inputs=flatten,
+                            units=120,
+                            activation=tf.nn.relu,
+                            kernel_initializer=DEFAULT_INITIALIZER,
+                            name='fc1')
+      fc1 = tf.nn.dropout(fc1, keep_prob)
+
+    with tf.name_scope('fc2'):
+      fc2 = tf.layers.dense(inputs=fc1,
+                            units=84,
+                            activation=tf.nn.relu,
+                            kernel_initializer=DEFAULT_INITIALIZER,
+                            name='fc2')
+      fc2 = tf.nn.dropout(fc2, keep_prob)
+
+    with tf.name_scope('logits'):
+      logits = tf.layers.dense(inputs=fc2,
+                               units=10,
+                               activation=None,
+                               kernel_initializer=DEFAULT_INITIALIZER,
+                               name='logits')
+
+    return x, y, is_train, lr, logits
+
+
+def lenet5_lr(graph):
+  with graph.as_default():
+    is_train = tf.placeholder(tf.bool, shape=(), name='is_train')
+    with tf.name_scope('inputs'):
+      x = tf.placeholder(DTYPE, shape=[None, 32*32*3], name='x')
+      x_reshaped = tf.reshape(x, shape=[-1, 32, 32, 3])
+      y = tf.placeholder(tf.int32, shape=[None], name='y')
+      lr = tf.placeholder_with_default(0.001, shape=(), name='learning_rate')
+    with tf.name_scope('conv1'):
+      conv1 = tf.layers.conv2d(x_reshaped,
+                               filters=6,
+                               kernel_size=5,
+                               strides=(1, 1),
+                               padding='VALID',
+                               activation=tf.nn.relu,
+                               kernel_initializer=DEFAULT_INITIALIZER)
+      conv1 = tf.nn.max_pool(value=conv1,
+                             ksize=(1, 2, 2, 1),
+                             strides=(1, 2, 2, 1),
+                             padding='VALID',
+                             name='max_pool1')
+    with tf.name_scope('conv2'):
+      conv2 = tf.layers.conv2d(conv1,
+                               filters=16,
+                               kernel_size=5,
+                               padding='VALID',
+                               activation=tf.nn.relu,
+                               kernel_initializer=DEFAULT_INITIALIZER)
+      conv2 = tf.nn.max_pool(value=conv2,
+                             ksize=(1, 2, 2, 1),
+                             strides=(1, 2, 2, 1),
+                             padding='VALID',
+                             name='max_pool2')
+    with tf.name_scope('fc1'):
+      flatten = tf.layers.Flatten()(conv2)
+      fc1 = tf.layers.dense(inputs=flatten,
+                            units=120,
+                            activation=tf.nn.relu,
+                            kernel_initializer=DEFAULT_INITIALIZER,
+                            name='fc1')
+
+    with tf.name_scope('fc2'):
+      fc2 = tf.layers.dense(inputs=fc1,
+                            units=84,
+                            activation=tf.nn.relu,
+                            kernel_initializer=DEFAULT_INITIALIZER,
+                            name='fc2')
+
+    with tf.name_scope('logits'):
+      logits = tf.layers.dense(inputs=fc2,
+                               units=10,
+                               activation=None,
+                               kernel_initializer=DEFAULT_INITIALIZER,
+                               name='logits')
+
+    return x, y, is_train, lr, logits
 
 def lenet5(graph):
   with graph.as_default():
@@ -200,45 +318,6 @@ def lenet5_with_dropout(graph):
 
 def get_shape(tensor):
   return tensor.get_shape().as_list()
-
-def resnet1(graph, n_resnet_blocks=5):
-  with graph.as_default():
-    is_train = tf.placeholder(tf.bool, shape=(), name='is_train')
-    with tf.name_scope('Input'):
-      with tf.name_scope('X'):
-
-        X = tf.placeholder(DTYPE, shape=[None, 32*32*3], name='X')
-        X_reshaped = tf.reshape(X, shape=[-1, 32, 32, 3])
-      with tf.name_scope('y'):
-        y = tf.placeholder(tf.int32, shape=[None], name='y')
-
-      with tf.name_scope('conv1'):
-        conv1 = tf.layers.conv2d(X_reshaped,
-                                 filters=16,
-                                 kernel_size=3,
-                                 strides=(1, 1),
-                                 padding='same',
-                                 activation=tf.nn.relu,
-                                 name='conv1'
-                                 )
-      x = conv1
-      for i in range(n_resnet_blocks):
-        if i == 0:
-          activations = [None, tf.nn.relu]
-        else:
-          activations = [tf.nn.relu, tf.nn.relu]
-        x = resnetblock(x, 32, activations=activations,
-                        name='resnetblock-'+str(i))
-
-      for i in range(n_resnet_blocks, 2*n_resnet_blocks):
-        x = resnetblock(x, 64, activations=activations,
-                        name='resnetblock-'+str(i))
-
-      with tf.name_scope('logits'):
-        logits = nn_layer(X=x, n_neurons=10, name='logits', activation=None)
-  return X, y, is_train, logits
-
-
 
 def lenet2(graph):
   """Lenet-7, no dropout"""

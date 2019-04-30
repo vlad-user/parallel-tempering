@@ -324,8 +324,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
             'y':train_labels
             }).batch(self._batch_size)
         iterator = data.make_initializable_iterator()
-
-
+        
         data = tf.data.Dataset.from_tensor_slices({
             'X':valid_data,
             'y':valid_labels
@@ -414,21 +413,6 @@ class Simulator: # pylint: disable=too-many-instance-attributes
             evaluated = (loss_err_vals
                         + evaled_diffs
                         + train_vals)
-            
-            #evaluated = sess.run(g.get_train_ops(),
-            #                     feed_dict=feed_dict)
-            
-            #evaluated = (evaluated[:2*self._n_replicas]
-            #            + evaled_diffs
-            #            + evaluated[-self._n_replicas:])
-
-            if self._hessian:
-                # not implemented
-                hessian_ops = g.get_hessian_eigenvalues_ops()
-                eigenvals = sess.run(hessian_ops,
-                                     feed_dict=feed_dict)
-                g._summary.store_hessian_eigenvals(eigenvals)
-              
 
             loss = g.extract_evaluated_tensors(evaluated, 'loss')
             err = g.extract_evaluated_tensors(evaluated, 'error')

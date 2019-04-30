@@ -20,8 +20,7 @@ FNAME_SUFFIX = '.log'
 
 DEVICE = 0
 def compute_accuracy(y_pred, y):
-  """Calculates accuracy."""
-  if list(y_pred.size()) != list(y.size()):
+   if list(y_pred.size()) != list(y.size()):
       raise ValueError('Inputs have different shapes.',
                        list(y_pred.size()), 'and', list(y.size()))
 
