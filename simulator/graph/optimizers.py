@@ -10,6 +10,7 @@ from simulator.simulator_utils import DTYPE
 
 NUMPY_DTYPE = (np.float64 if DTYPE == tf.float64 else np.float32)
 
+
 class Optimizer:
   """Base wrapper for tensorflow optimizers."""
   def __init__(self, learning_rate, replica_id, noise_list=None, # pylint: disable=too-many-arguments
