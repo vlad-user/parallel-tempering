@@ -75,10 +75,42 @@ class SimulatorGraph:
   ```
   """
 
+  _noise_types = ['weight_noise',
+                  'langevin',
+                  'dropout',
+                  'dropout_rmsprop',
+                  'dropout_gd',
+                  'gd_no_noise',
+                  'l2_regularizer',
+                  'l2_regularizer_with_dropout',
+                  'input_noise',
+                  'learning_rate'] # possible noise types
+  _summary_types = ['diffusion_summary',
+                    'train_loss_summary',
+                    'train_error_summary',
+                    'test_loss_summary',
+                    'test_error_summary',
+                    'validation_loss_summary',
+                    'validation_error_summary',
+                    'train_steps_summary',
+                    'test_steps_summary',
+                    'validation_steps_summary',
+                    'moa_train_loss_summary',
+                    'moa_test_loss_summary',
+                    'moa_validation_loss_summary',
+                    'moa_train_error_summary',
+                    'moa_test_error_summary',
+                    'moa_validation_error_summary',
+                    'moa_train_steps_summary',
+                    'moa_test_steps_summary',
+                    'moa_validation_steps_summary',
+                    'moa_weights_summary']
+
   def __init__(self, model, learning_rate, noise_list, name,
                ensembles=None, noise_type='weight_noise',
                simulation_num=None, loss_func_name='cross_entropy',
-               proba_coeff=1.0, hessian=False, lambda_=0.01,
+               proba_coeff=1.0, hessian=False, mode=None,
+               moa_lr=None, lambda_=0.01,
                rmsprop_decay=0.9, rmsprop_momentum=0.0,
                rmsprop_epsilon=1e-10):
     """Instantiates a new SimulatorGraph object.
@@ -121,11 +153,22 @@ class SimulatorGraph:
         supported.
       proba_coeff: The coeffecient is used in calculation of
         probability of swaps. Specifically, we have
-        P(accept_swap) = exp(proba_coeff*(beta_1-beta_2)(E_1-E_2))
+        `P(accept_swap) = exp(proba_coeff*(beta_1-beta_2)(E_1-E_2))`
       hessian: (Boolean) If `True`, computes Hessian and its
         eigenvalues during each swap step. Default is `False` since
         it is computationally intensive and should be used only for
         small networks. **Not implemented**.
+      mode: If `None` (default) will prepare graph for regular parallel
+        tempering simulation. If one of `['MOA', 'mixture_of_agents']`,
+        in addition to a parallel tempering mode will also train and
+        do inference on a weighted outputs of `logits` of all replicas.
+        The weight update of such MOA structure is made only on weights
+        that `logits` of each replica are multiplied. The updates for
+        weights of each replica are made as in usual parallel tempering
+        simulation. The learning rate for MOA update is taken from
+        `moa_lr` argument.
+      moa_lr: A learning rate for `MOA` mode. If `None`, the
+        learning rate for replicas is used.
       lambda_: In case of `l2_regularizer_with_dropout`, the constant
         regularization parameter is applied for every replica. For
         other noise types, this value is ignored.
@@ -143,22 +186,11 @@ class SimulatorGraph:
         other `noise_types`.
     """
 
-    self._noise_types = ['weight_noise',
-                         'langevin',
-                         'dropout',
-                         'dropout_rmsprop',
-                         'dropout_gd',
-                         'gd_no_noise',
-                         'l2_regularizer',
-                         'l2_regularizer_with_dropout',
-                         'input_noise',
-                         'learning_rate'] # possible noise types
-
     if not isinstance(noise_list, list) or not noise_list:
-      raise ValueError("Invalid `noise_list`. Should be non-empty python list.")
+      raise ValueError("Invalid `noise_list`. Should be non-empty Python list.")
 
     self._model = model
-    self._learning_rate = learning_rate
+    self._lr = learning_rate
     self._n_replicas = len(noise_list)
     self._noise_type = noise_type
     self._name = name
@@ -171,15 +203,18 @@ class SimulatorGraph:
     self._accept_ratio = 0
     self._hessian = hessian
     self._lambda = lambda_
+    self._mode = mode
+    self._moa_lr = (learning_rate if moa_lr is None else moa_lr)
 
     # create graph with duplicated ensembles based on the provided
     # model function and noise type
     if ensembles is not None:
       try:
-        self.X = ensembles['X']
+        self.X = ensembles['x']
         self.y = ensembles['y']
         self.is_train = ensembles['is_train']
         logits_list = ensembles['logits_list']
+        self.logits_list = logits_list
         self._graph = self.X.graph
         if 'keep_prob_list' in ensembles:
           probs = ensembles['keep_prob_list']
@@ -209,7 +244,7 @@ class SimulatorGraph:
 
           self.X, self.y, self.is_train, logits_list = copy_and_duplicate(
               X, y, is_train, logits, self._n_replicas, self._graph, self._noise_type)
-
+          self.logits_list = logits_list
           # _noise_plcholders will be used to store noise vals for summaries
           with self._graph.as_default():
             self._noise_plcholders = {i:tf.placeholder(DTYPE, shape=[])
@@ -227,7 +262,7 @@ class SimulatorGraph:
           self.X, self.y, self.is_train, probs, logits_list = copy_and_duplicate(
               X, y, is_train, logits, self._n_replicas, self._graph, self._noise_type,
               prob_placeholder)
-
+          self.logits_list = logits_list
           # _noise_plcholders stores dropout plcholders: {replica_id:plcholder}
           # it is used also to store summaries
           self._noise_plcholders = {i:p for i, p in enumerate(probs)}
@@ -287,15 +322,15 @@ class SimulatorGraph:
 
           if noise_type.lower() == 'weight_noise':
             optimizer = NormalNoiseGDOptimizer(
-                self._learning_rate, i, self._noise_list)
+                self._lr, i, self._noise_list)
 
           elif noise_type.lower() == 'langevin':
             optimizer = GDLDOptimizer(
-                self._learning_rate, i, self._noise_list)
+                self._lr, i, self._noise_list)
 
           elif noise_type.lower() == 'dropout_rmsprop':
             optimizer = RMSPropOptimizer(
-                self._learning_rate, i, self._noise_list,
+                self._lr, i, self._noise_list,
                 decay=rmsprop_decay, momentum=rmsprop_momentum,
                 epsilon=rmsprop_epsilon)
 
@@ -305,7 +340,7 @@ class SimulatorGraph:
                                       'l2_regularizer',
                                       'input_noise']:
             optimizer = GDOptimizer(
-                self._learning_rate, i, self._noise_list)
+                self._lr, i, self._noise_list)
 
           elif noise_type.lower() in ['learning_rate']:
             optimizer = GDOptimizer(
@@ -323,10 +358,30 @@ class SimulatorGraph:
                               simulation_num,
                               hessian=self._hessian)
 
+      if self._mode in ['MOA', 'mixture_of_experts', 'moa']:
+        self._create_moa_ops()
       self.variable_initializer = tf.global_variables_initializer()
 
+  def _create_moa_ops(self):
+    """Creates MOA ops."""
+    with self.X.graph.as_default():
+      self._moa_weights = tf.Variable(tf.random_normal([self._n_replicas, 1, 1]))
+      expanded = [tf.expand_dims(self.logits_list[i], 0) for i in range(self._n_replicas)]
+      concated = tf.concat(expanded, 0)
+      weighted = self._moa_weights * concated
+      moa_logits = tf.reduce_sum(weighted, 0)
+      self._moa_loss_op = self._cross_entropy_loss(self.y, moa_logits)
+      self._moa_error_op = self._error(self.y, moa_logits)
+      moa_grads = tf.gradients(self._moa_loss_op, [self._moa_weights])
+      depend_ops = [self._optimizer_dict[i].get_train_op() for i in range(self._n_replicas)]
       
+      with tf.control_dependencies(depend_ops):
+        self._moa_train_op = tf.assign(self._moa_weights,
+                                       self._moa_weights - self._moa_lr*moa_grads[0])
+
+
   def flush_summary(self):
+    """Flushes accumulated summary to disk."""
     self._summary.flush_summary()
 
   def create_feed_dict(self, X_batch, y_batch, dataset_type='train'): # pylint: disable=invalid-name
@@ -381,16 +436,52 @@ class SimulatorGraph:
       feed_dict.update({self.is_train:False})
     return feed_dict
 
-  def get_hessian_eigenvalues_ops(self):
-    
-    raise NotImplementedError()
-    if self._hessian == False:
-      err_msg = ("`hessian` argument was set to `False` during "
-                 "initialization of this instance. To use the function "
-                 "set `hessian=True`.")
-      raise ValueError(err_msg)
+  def get_ops(self,
+              loss_ops=False,
+              error_ops=False,
+              weights_update_ops=False,
+              diffusion_ops=False,
+              moa_loss_ops=False,
+              moa_error_ops=False,
+              moa_weights_update_ops=False,
+              moa_weights_vars=False):
+    """Returns ops for evaluation in the session context.
 
-    return [self._summary._hess_eigenval_ops[i] for i in range(self._n_replicas)]
+    Raises: 
+      ValueError: If all arguments are `False` or if one of the MOA
+        argument is `True` but mode hasn't been set to `MOA` when
+        this class was instantiated.
+    """
+    res = []
+    if loss_ops:
+      res += [self._loss_dict[i] for i in range(self._n_replicas)]
+    if error_ops:
+      res += [self._error_dict[i] for i in range(self._n_replicas)]
+    if diffusion_ops:
+      res += [self._summary.get_diffusion_ops()]
+    if weights_update_ops:
+      res += [self._optimizer_dict[i].get_train_op()
+              for i in range(self._n_replicas)]
+    try:
+      if moa_loss_ops:
+        res += [self._moa_loss_op]
+      if moa_error_ops:
+        res += [self._moa_error_op]
+      if moa_weights_update_ops:
+        res += [self._moa_train_op]
+      if moa_weights_vars:
+        res += [self._moa_weights]
+    except AttributeError:
+      err_msg = ('mode argument must be set to `MOA` in order to '
+                 'use moa ops.')
+      raise ValueError(err_msg)
+    
+    if len(res) == 0:
+      err_msg = ('At least one of the boolean arguments must be '
+                 'set to True.')
+      raise ValueError(err_msg)
+    return res
+
 
   def get_train_ops(self, dataset_type='train', loss_err=True, special_ops=False):
     """Returns train ops for session's run.
@@ -493,7 +584,68 @@ class SimulatorGraph:
     if epoch is not None:
       self._summary._epoch = epoch
 
+  def add_summary_v2(self, evaluated_dict, epoch, add_noise_vals=False):
+    """Logs the summary.
 
+    Args:
+      evaluated_dict: A dictionary with keys from 
+        `SimulatorGraph._summary_types` and values representing the
+        evaluated values of tensors that need to be logged. Each such
+        value can be either a list of length `n_replicas` OR a single
+        value (in case of batch step) of `summary_type`.
+        In case of a list, list must be sorted based on the 
+        replica id key.
+      epoch: A number of the current epoch.
+      add_noise_vals: If `True`, adds noise values of current replica to
+        the summary. Should be set to `True` logging train values.
+
+    Raises:
+      ValueError: If `summary_type` key in `evaluated_dict` is not
+        in `SimulatorGraph._summary_types` or incorrect argument.
+    """
+    for summary_type in evaluated_dict:
+      if summary_type not in self._summary_types:
+        err_msg = ('The `summary_type` value is not in list of '
+                   'allowed values. Allowed values are:\n'
+                   + ', '.join(self._summary_types))
+        raise ValueError(err_msg)
+      evaluated = evaluated_dict[summary_type]
+
+      if 'loss' in summary_type or 'error' in summary_type or 'steps' in summary_type:
+        attr_name = '_' + '_'.join(summary_type.split('_')[:-1])
+        attr_name = attr_name.replace('error', 'err')
+        attr_name = attr_name.replace('validation', 'valid')
+        summary = self._summary.__dict__[attr_name]
+      elif 'diffusion' in summary_type:
+        attr_name = '_diffusion_vals'
+        summary = self._summary.__dict__[attr_name]
+      elif 'weights' in summary_type:
+        attr_name = '_moa_weights'
+        summary = self._summary.__dict__[attr_name]
+
+      try:
+        if (isinstance(summary, list)
+            and not isinstance(evaluated, list)):
+          summary.append(evaluated)
+        elif (isinstance(summary, dict)
+              and isinstance(evaluated, list)):
+          for i in range(self._n_replicas):
+            summary[i].append(evaluated[i])
+        else:
+          print(summary_type, evaluated_dict[summary_type])
+          raise ValueError()
+
+      except Exception as exc:
+
+        err_msg = ('`evaluated_dict` must be a dictionary with allowed '
+                     'keys (see `SimulatorGraph._summary_types`) with '
+                     'values that are floats/integers or lists. Got:\n')
+        err_msg += str(evaluated_dict)
+        raise ValueError(err_msg) from exc
+    if add_noise_vals:
+      self._summary.add_noise_vals(self._curr_noise_dict)
+
+    self._summary._epoch = epoch
 
   def extract_evaluated_tensors(self, evaluated, tensor_type):
     """Extracts tensors from a list of tensors evaluated by tf.Session.
@@ -532,9 +684,9 @@ class SimulatorGraph:
     else:
       raise InvalidTensorTypeError()
 
-  def swap_replicas(self, evaluated):
+  def swap_replicas(self, loss_list):
     """Swaps between two replicas with adjacent noise levels.
-
+    
     Swaps according to:
       1. Uniformly randomly select a pair of adjacent temperatures
         1/beta_i and 1/beta_i+1, for which swap move is proposed.
@@ -543,34 +695,27 @@ class SimulatorGraph:
       3. Updates the acceptance ratio for the proposed swap.
 
     Args:
-      `evaluated`: a list returned by `sess.run(get_train_ops())`.
+      loss_list: A list of evaluated losses for each replica. Should
+        be sorted based on replica ID key.
     """
-    random_pair = random.choice(range(self._n_replicas - 1)) # pair number
+    self._swap_attempts += 1
+    random_pair = random.choice(range(self._n_replicas - 1))
 
     beta = [self._curr_noise_dict[x] for x in range(self._n_replicas)]
-    beta_id = [(b, i) for i, b in enumerate(beta)]
-    reverse = (True if self._noise_type in ['weight_noise', 'langevin'] else False)
-    beta_id.sort(key=lambda x: x[0], reverse=reverse)
-
-    i = beta_id[random_pair][1]
-    j = beta_id[random_pair+1][1]
-
-    beta_i = beta_id[random_pair][0]
-    beta_j = beta_id[random_pair+1][0]
-
-    loss_list = self.extract_evaluated_tensors(evaluated, 'loss')
-
+    betas_and_ids = [(1.0/b, i) for i, b in enumerate(beta)]
+    betas_and_ids.sort(key=lambda x: x[0])
+    i = betas_and_ids[random_pair][1]
+    j = betas_and_ids[random_pair + 1][1]
+    beta_i = betas_and_ids[random_pair][0]
+    beta_j = betas_and_ids[random_pair + 1][0]
     li, lj = loss_list[i], loss_list[j]
-    proba = np.exp(self._proba_coeff*(li-lj)*(beta_i-beta_j))
+    proba = np.exp(self._proba_coeff*(li - lj)*(beta_i - beta_j))
 
-    self._swap_attempts += 1
     if np.random.uniform() < proba:
       self._curr_noise_dict[i] = beta_j
       self._curr_noise_dict[j] = beta_i
       self._optimizer_dict[i].set_train_route(j)
       self._optimizer_dict[j].set_train_route(i)
-
-      
       self._swap_successes += 1
       accept_pair = [(i, 1), (j, 1)]
     else:
@@ -580,7 +725,6 @@ class SimulatorGraph:
       self._summary._replica_accepts[p[0]].append(p[1])
 
     self._accept_ratio = self._swap_successes / self._swap_attempts
-
 
   def get_tf_graph(self):
     """Returns tensorflow graph."""
@@ -651,12 +795,7 @@ class SimulatorGraph:
                               k=1)
       error = 1.0 - tf.reduce_mean(tf.cast(x=y_pred, dtype=DTYPE),
                                    name='error')
-      '''
-      softmax = tf.nn.softmax(logits)
-      pred = tf.argmax(softmax, 1)
-      equals = tf.equal(tf.cast(pred, tf.int32), y)
-      error = 1.0 - tf.reduce_mean(tf.cast(equals, tf.float32))
-      '''
+
     return error
 
   def _stun_loss(self, loss, gamma=1): # pylint: disable=no-self-use

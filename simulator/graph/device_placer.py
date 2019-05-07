@@ -1,5 +1,6 @@
 """Helper model for assigning ops to devices.
 'export LD_LIBRARY_PATH=LD_LIBRARY_PATH:/usr/local/cuda-9.0/lib64/'
+'export LD_LIBRARY_PATH=/usr/local/cuda-9.0/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}:/usr/lib/nvidia-418/'
 """
 from __future__ import absolute_import
 import os

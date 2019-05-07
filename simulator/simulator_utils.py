@@ -43,7 +43,8 @@ def generate_experiment_name(model_name=None,
                              batch_size=None,
                              proba_coeff=1.0,
                              train_data_size=True,
-                             version='v2'):
+                             mode=None,
+                             version='v3'):
   
   """
   name:
@@ -62,8 +63,10 @@ def generate_experiment_name(model_name=None,
     <noise_type>
     <proba_coeff>
     <beta_n>
+    <mode>
     <version>
     v2 == added <beta_n>
+    v3 == added mode (ie MOA)
   """
 
 
@@ -99,8 +102,8 @@ def generate_experiment_name(model_name=None,
   name = name + str(learning_rate) + '_' + str(n_epochs) + '_'
   name = name + str(batch_size) + '_'
   name = name + str(noise_type.replace('_', '')) + '_'
-  name = name + str(proba_coeff) + '_' + str(beta_n) + '_' + version
-
+  name = name + str(proba_coeff) + '_' + str(beta_n) + '_' + str(mode) + '_'
+  name = name + version
   return name
 
 class GlobalDescriptor(object): # pylint:disable=useless-object-inheritance

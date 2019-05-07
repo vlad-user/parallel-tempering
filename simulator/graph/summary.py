@@ -13,7 +13,7 @@ FNAME_SUFFIX = '.log'
 
 class Summary:
   """Helper class for storing training log."""
-  def __init__(self, name, optimizers, losses, simulation_num, hessian=False):
+  def __init__(self, name, optimizers, losses, simulation_num, hessian=False, diffusion_ops=None):
     self._n_replicas = len(optimizers.keys())
     self._name = name
     self.simulation_num = simulation_num
@@ -40,8 +40,20 @@ class Summary:
     self._train_noise_vals = {i:[] for i in range(self._n_replicas)}
     self._diffusion_vals = {i:[] for i in range(self._n_replicas)}
     self._replica_accepts = {i:[] for i in range(self._n_replicas)}
-
-    self._diffusion_ops = self._create_diffusion_ops(optimizers)
+    self._moa_train_steps = []
+    self._moa_test_steps = []
+    self._moa_valid_steps = []
+    self._moa_train_loss = []
+    self._moa_test_loss = []
+    self._moa_valid_loss = []
+    self._moa_train_err = []
+    self._moa_test_err = []
+    self._moa_valid_err = []
+    self._moa_weights = {i:[] for i in range(self._n_replicas)}
+    if diffusion_ops is None:
+      self._diffusion_ops = self._create_diffusion_ops(optimizers)
+    else:
+      self._diffusion_ops = diffusion_ops
     if hessian:
       raise NotImplementedError('Currently no need for this.')
       self._hessian_dirname = os.path.join(self._dirname, 'hessian')
@@ -212,6 +224,8 @@ class Summary:
     is not supported. Reading a train log file on Windows during
     training may damage the log data.
     """
+    assert len(self._train_loss[0]) == len(self._diffusion_vals[0])
+    assert len(self._train_loss[0]) == len(self._train_err[0])
     log_data = {
         'train_loss': self._train_loss,
         'train_error': self._train_err,
@@ -226,6 +240,16 @@ class Summary:
         'diffusion': self._diffusion_vals,
         'accepts': self._replica_accepts,
         'latest_epoch': self._epoch,
+        'moa_train_loss': self._moa_train_loss,
+        'moa_test_loss': self._moa_test_loss,
+        'moa_validation_loss': self._moa_valid_loss,
+        'moa_train_error': self._moa_train_err,
+        'moa_test_error': self._moa_test_err,
+        'moa_validation_error': self._moa_valid_err,
+        'moa_train_steps': self._moa_train_steps,
+        'moa_test_steps': self._moa_test_steps,
+        'moa_validation_steps': self._moa_valid_steps,
+        'moa_weights': self._moa_weights
     }
 
     if 'win' in sys.platform:

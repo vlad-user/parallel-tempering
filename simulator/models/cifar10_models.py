@@ -10,6 +10,25 @@ from simulator.models.helpers import nn_layer, flatten, resnetblock
 from simulator.graph.device_placer import _gpu_device_name
 from simulator.simulator_utils import DTYPE
 from simulator.models.helpers import DEFAULT_INITIALIZER
+from simulator.models.resnet.models import resnet as resnet_creator
+
+def resnet(graph, n_replicas, resnet_size=20):
+  with graph.as_default():
+    is_train = tf.placeholder(tf.bool, shape=(), name='is_train')
+    with tf.name_scope('inputs'):
+      x = tf.placeholder(tf.float32, shape=(None, 32, 32, 3), name='x')
+      y = tf.placeholder(tf.int32, shape=(None), name='y')
+
+    logits_list = []
+    for i in range(n_replicas):
+      with tf.name_scope('ensemble_%s' %i):
+        logits_list.append(resnet_creator(x, resnet_size))
+    
+  ensembles = {'x': x,
+               'y':y,
+               'is_train': is_train,
+               'logits_list': logits_list}
+  return ensembles
 
 def lenet5_with_input_noise(graph):
   with graph.as_default():
