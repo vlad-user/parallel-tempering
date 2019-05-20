@@ -2,15 +2,18 @@ import sys
 import os
 import json
 from time import time
+import pickle
 
 import tensorflow as tf
 import numpy as np
 from sklearn.model_selection import train_test_split
+from sklearn.utils import shuffle as arys_shuffle
 
 from simulator.models.resnet import resnet_v2
 from simulator.graph.device_placer import _get_available_gpus
 from simulator.graph.summary import Summary
 from simulator import simulator_utils as s_utils
+from simulator.read_datasets import _create_cifar_data_or_get_existing_resnet
 
 _FLUSH_EVERY = 90
 _MAX_STEPS = 64000
@@ -24,7 +27,7 @@ def _diffusion_ops():
   diffusion = tf.reduce_sum(l2_difference)
   return diffusion
 
-def create_resnet_model(resnet_size=20, input_shape=(32, 32, 3), momentum=0.9):
+def create_resnet_model(resnet_size=20, input_shape=(32, 32, 3), momentum=0.9,):
   with tf.device('gpu:1'):
     with tf.name_scope('inputs'):
       x = tf.placeholder(tf.float32, shape=(None, ) + input_shape)
@@ -32,7 +35,7 @@ def create_resnet_model(resnet_size=20, input_shape=(32, 32, 3), momentum=0.9):
 
     #logits = resnet_creator(x, resnet_size)
     N = int((resnet_size - 2) / 6)
-    logits, istrain = resnet_v2.inference(x, N)
+    logits, istrain = resnet_v2.resnet_creator(x, N)
 
     with tf.name_scope('learning_rate'):
       lr = tf.placeholder(tf.float32, shape=())
@@ -63,6 +66,7 @@ def _train_epoch(sess, next_batch, iterator, loss_tensor, err_tensor, inputs):
   batch_loss = []
   batch_err = []
   x, y = inputs
+
   while True:
     try:
       batch = sess.run(next_batch)
@@ -81,18 +85,21 @@ def _train_epoch(sess, next_batch, iterator, loss_tensor, err_tensor, inputs):
 
   return np.mean(batch_loss), np.mean(batch_err)
 
-
 def train(n_epochs, steps, batch_size=128, simulation_num=0, name=None):
   train_step = steps['train_step']
   test_step = steps['test_step']
   valid_step = steps['valid_step']
+  
+  x_train, y_train, x_test, y_test, x_valid, y_valid = (
+      _create_cifar_data_or_get_existing_resnet())
+
   if name == None:
     name = s_utils.generate_experiment_name(
         model_name='resnet20',
         dataset_name='cifar',
         separation_ratio=0,
         n_replicas=1,
-        noise_type='momentnonoise',
+        noise_type='momentumnonoise',
         n_epochs=n_epochs,
         burn_in_period=0,
         beta_0=0,
@@ -145,11 +152,26 @@ def train(n_epochs, steps, batch_size=128, simulation_num=0, name=None):
   }
   with open(filepath, 'w') as fo:
     json.dump(log, fo, indent=4)
+  
+  
+  
 
+  '''
   (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
-  y_train, y_test = np.squeeze(y_train), np.squeeze(y_test)
-  x_train, x_test = x_train / 255., x_test / 255.
-  x_train, x_valid, y_train, y_valid = train_test_split(x_train, y_train, test_size=0.1)
+  data, labels = np.vstack([x_train, x_test]), np.vstack([y_train, y_test])
+  data = data / 255.
+  labels = labels.squeeze()
+  mean = np.mean(data, axis=0)[None, ...]
+  data = data - mean
+  data, labels = arys_shuffle(data, labels)
+  x_test, y_test = data[:10000], labels[:10000]
+  x_train, y_train = data[10000:], labels[10000:]
+  x_train, x_valid, y_train, y_valid = train_test_split(x_train,
+                                                      y_train,
+                                                      test_size=0.1,
+                                                      shuffle=True)
+
+  '''
 
   data = tf.data.Dataset.from_tensor_slices({
       'x': x_train,
@@ -168,6 +190,7 @@ def train(n_epochs, steps, batch_size=128, simulation_num=0, name=None):
       'y': y_valid
     }).batch(batch_size)
   iter_valid = data.make_initializable_iterator()
+
   config = tf.ConfigProto(allow_soft_placement=True)
   with tf.Session(config=config) as sess:
     sess.run([tf.global_variables_initializer(),

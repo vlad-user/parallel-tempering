@@ -1,32 +1,36 @@
-from __future__ import print_function
-from __future__ import division
-from __future__ import absolute_import
+import os
+import collections
+import pickle
 
 import numpy as np
 import tensorflow as tf
-import collections
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.utils import shuffle as arys_shuffle
 
 from simulator.models.helpers import nn_layer, flatten, resnetblock
 from simulator.graph.device_placer import _gpu_device_name
 from simulator.simulator_utils import DTYPE
 from simulator.models.helpers import DEFAULT_INITIALIZER
-from simulator.models.resnet.models import resnet as resnet_creator
+from simulator.models.resnet.resnet_v2 import resnet_creator
 
 def resnet(graph, n_replicas, resnet_size=20):
   with graph.as_default():
-    is_train = tf.placeholder(tf.bool, shape=(), name='is_train')
     with tf.name_scope('inputs'):
       x = tf.placeholder(tf.float32, shape=(None, 32, 32, 3), name='x')
       y = tf.placeholder(tf.int32, shape=(None), name='y')
 
     logits_list = []
+    N = int((resnet_size - 2) / 6) # <-- resnet_size = 6N + 2
+    istrain = tf.placeholder_with_default(False, shape=())
     for i in range(n_replicas):
-      with tf.name_scope('ensemble_%s' %i):
-        logits_list.append(resnet_creator(x, resnet_size))
+      with tf.device(_gpu_device_name(i)):
+        with tf.variable_scope('ensemble_%s' %i):
+          logits_list.append(resnet_creator(x, N, istrain)[0])
     
   ensembles = {'x': x,
-               'y':y,
-               'is_train': is_train,
+               'y': y,
+               'is_train': istrain,
                'logits_list': logits_list}
   return ensembles
 
@@ -272,64 +276,63 @@ def lenet5_with_dropout(graph):
   with graph.as_default():
     is_train = tf.placeholder(tf.bool, shape=(), name='is_train')
     with tf.name_scope('inputs'):
-      x = tf.placeholder(DTYPE, shape=[None, 32*32*3], name='x')
-      x_reshaped = tf.reshape(x, shape=[-1, 32, 32, 3])
+      x = tf.placeholder(DTYPE, shape=(None, 32, 32, 3), name='x')
       y = tf.placeholder(tf.int32, shape=[None], name='y')
       keep_prob = tf.placeholder_with_default(input=1.0,
                                               shape=(),
                                               name='keep_prob')
-
-    with tf.name_scope('conv1'):
-      conv1 = tf.layers.conv2d(x_reshaped,
-                               filters=6,
-                               kernel_size=5,
-                               strides=(1, 1),
+    with tf.device('gpu:0'):
+      with tf.name_scope('conv1'):
+        conv1 = tf.layers.conv2d(x,
+                                 filters=6,
+                                 kernel_size=5,
+                                 strides=(1, 1),
+                                 padding='VALID',
+                                 activation=tf.nn.relu,
+                                 kernel_initializer=DEFAULT_INITIALIZER)
+        conv1 = tf.nn.max_pool(value=conv1,
+                               ksize=(1, 2, 2, 1),
+                               strides=(1, 2, 2, 1),
                                padding='VALID',
-                               activation=tf.nn.relu,
-                               kernel_initializer=DEFAULT_INITIALIZER)
-      conv1 = tf.nn.max_pool(value=conv1,
-                             ksize=(1, 2, 2, 1),
-                             strides=(1, 2, 2, 1),
-                             padding='VALID',
-                             name='max_pool1')
-      conv1 = tf.nn.dropout(conv1, keep_prob)
+                               name='max_pool1')
+        conv1 = tf.nn.dropout(conv1, keep_prob)
 
-    with tf.name_scope('conv2'):
-      conv2 = tf.layers.conv2d(conv1,
-                               filters=16,
-                               kernel_size=5,
+      with tf.name_scope('conv2'):
+        conv2 = tf.layers.conv2d(conv1,
+                                 filters=16,
+                                 kernel_size=5,
+                                 padding='VALID',
+                                 activation=tf.nn.relu,
+                                 kernel_initializer=DEFAULT_INITIALIZER)
+        conv2 = tf.nn.max_pool(value=conv2,
+                               ksize=(1, 2, 2, 1),
+                               strides=(1, 2, 2, 1),
                                padding='VALID',
-                               activation=tf.nn.relu,
-                               kernel_initializer=DEFAULT_INITIALIZER)
-      conv2 = tf.nn.max_pool(value=conv2,
-                             ksize=(1, 2, 2, 1),
-                             strides=(1, 2, 2, 1),
-                             padding='VALID',
-                             name='max_pool2')
-      conv2 = tf.nn.dropout(conv2, keep_prob)
-    with tf.name_scope('fc1'):
-      flatten = tf.layers.Flatten()(conv2)
-      fc1 = tf.layers.dense(inputs=flatten,
-                            units=120,
-                            activation=tf.nn.relu,
-                            kernel_initializer=DEFAULT_INITIALIZER,
-                            name='fc1')
-      fc1 = tf.nn.dropout(fc1, keep_prob)
+                               name='max_pool2')
+        conv2 = tf.nn.dropout(conv2, keep_prob)
+      with tf.name_scope('fc1'):
+        flatten = tf.layers.Flatten()(conv2)
+        fc1 = tf.layers.dense(inputs=flatten,
+                              units=120,
+                              activation=tf.nn.relu,
+                              kernel_initializer=DEFAULT_INITIALIZER,
+                              name='fc1')
+        fc1 = tf.nn.dropout(fc1, keep_prob)
 
-    with tf.name_scope('fc2'):
-      fc2 = tf.layers.dense(inputs=fc1,
-                            units=84,
-                            activation=tf.nn.relu,
-                            kernel_initializer=DEFAULT_INITIALIZER,
-                            name='fc2')
-      fc2 = tf.nn.dropout(fc2, keep_prob)
+      with tf.name_scope('fc2'):
+        fc2 = tf.layers.dense(inputs=fc1,
+                              units=84,
+                              activation=tf.nn.relu,
+                              kernel_initializer=DEFAULT_INITIALIZER,
+                              name='fc2')
+        fc2 = tf.nn.dropout(fc2, keep_prob)
 
-    with tf.name_scope('logits'):
-      logits = tf.layers.dense(inputs=fc2,
-                               units=10,
-                               activation=None,
-                               kernel_initializer=DEFAULT_INITIALIZER,
-                               name='logits')
+      with tf.name_scope('logits'):
+        logits = tf.layers.dense(inputs=fc2,
+                                 units=10,
+                                 activation=None,
+                                 kernel_initializer=DEFAULT_INITIALIZER,
+                                 name='logits')
 
     return x, y, is_train, keep_prob, logits
 

@@ -116,6 +116,8 @@ class Simulator: # pylint: disable=too-many-instance-attributes
                description=None,
                test_batch = None,
                hessian=False,
+               scheduled_noise=None,
+               scheduled_lr=None,
                mode=None,
                moa_lr=None,
                rmsprop_decay=0.9,
@@ -171,6 +173,14 @@ class Simulator: # pylint: disable=too-many-instance-attributes
         eigenvalues during each swap step. Default is `False` since
         it is computationally intensive and should be used only for
         small networks.
+      scheduled_noise: A dictionary specifying with keys corresponding
+        steps and values corresponding to `noise_list` at which start
+        to apply this values. It could be used for hyper-param annealing,
+        or using constant learning rate for every replica and then start
+        exchanges instead of annealing.
+      scheduled_learning_rate: Same as `scheduled_noise` but only for
+        learning rate. This can be used for annealing when `noise_type`
+        is not `learning_rate`.
       mode: If `None` (default) will prepare graph for regular parallel
         tempering simulation. If one of `['MOA', 'mixture_of_agents']`,
         in addition to a parallel tempering mode will also train and
@@ -220,6 +230,8 @@ class Simulator: # pylint: disable=too-many-instance-attributes
     self._description = description
     self._ensembles = ensembles
     self._hessian = hessian
+    self._scheduled_noise = scheduled_noise
+    self._scheduled_lr = scheduled_lr
     self._mode = mode
     self._moa_lr = moa_lr
     self.rmsprop_decay = rmsprop_decay
@@ -253,7 +265,6 @@ class Simulator: # pylint: disable=too-many-instance-attributes
     sim_names = []
 
     for i in range(self._n_simulations):
-      
       
       train_data, train_labels = sklearn.utils.shuffle(
           train_data, train_labels)
@@ -300,6 +311,40 @@ class Simulator: # pylint: disable=too-many-instance-attributes
         `validation_labels`.
 
     """
+    # we define step at which we (maybe) want to modify noise values
+    scheduled_noise = self._scheduled_noise
+    scheduled_lr = self._scheduled_lr
+    
+    if scheduled_noise is not None:
+      scheduled_steps = list(sorted(scheduled_noise.keys())) + [np.inf]
+    else:
+      scheduled_steps = [np.inf]
+
+    # step to modify learning rate (e.g. for annealing learning
+    # rate with dropout (or something else) as `noise_type`)
+    if scheduled_lr is not None:
+      if 'learning_rate' is self._noise_type:
+        err_msg = ("If `noise_type` is 'learning_rate' "
+                   "`scheduled_learning_rate` cannot be used.")
+        raise ValueError(err_msg)
+    else:
+      scheduled_lr = {1: self._learning_rate}
+
+    scheduled_lrs = list(sorted(scheduled_lr.keys())) + [np.inf]
+
+
+    def get_next_scheduled_step():
+      for s in scheduled_steps:
+          yield s
+    def get_next_scheduled_lr():
+      for lr in scheduled_lrs:
+        yield lr
+
+    next_scheduled_step_iter = get_next_scheduled_step()
+    next_scheduled_step = next_scheduled_step_iter.__next__()
+    next_scheduled_lr_iter = get_next_scheduled_lr()
+    next_scheduled_lr = next_scheduled_lr_iter.__next__()
+
 
     last_flush_time = time()
     
@@ -338,7 +383,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
         data = tf.data.Dataset.from_tensor_slices({
             'x':train_data,
             'y':train_labels
-            }).batch(self._batch_size)
+            }).shuffle(train_data.shape[0]).batch(self._batch_size)
         iterator = data.make_initializable_iterator()
         
         data = tf.data.Dataset.from_tensor_slices({
@@ -357,8 +402,9 @@ class Simulator: # pylint: disable=too-many-instance-attributes
       raise
 
     step = 1
+    config = tf.ConfigProto(allow_soft_placement=True)
 
-    with tf.Session(graph=g.get_tf_graph()) as sess:
+    with tf.Session(graph=g.get_tf_graph(), config=config) as sess:
       _ = sess.run([iterator.initializer,
                     iter_valid.initializer,
                     iter_test.initializer,
@@ -375,6 +421,13 @@ class Simulator: # pylint: disable=too-many-instance-attributes
         while True:
           try:
             
+            if step > next_scheduled_step:
+              g.update_noise_values(scheduled_noise[next_scheduled_step])
+              next_scheduled_step = next_scheduled_step_iter.__next__()
+
+            if step > next_scheduled_lr:
+              g._lr = scheduled_lr[next_scheduled_lr]
+              next_scheduled_lr = next_scheduled_lr_iter.__next__()
 
             ### test ###
             if step % self._test_step == 0 or step == 1:
@@ -387,14 +440,15 @@ class Simulator: # pylint: disable=too-many-instance-attributes
                 'test_error_summary': evaluated[self._n_replicas:],
                 'test_steps_summary': step
                 }, epoch)
+              vals2log = evaluated[self._n_replicas:]
 
-              self.print_log(epoch,
-                             step,
-                             evaluated[self._n_replicas:],
-                             g.get_accept_ratio())
+            self.print_log(epoch,
+                           step,
+                           vals2log,
+                           g.get_accept_ratio())
 
             ### validation + swaps ###
-            if step % self._swap_step == 0:
+            if step % self._swap_step == 0 or step == 1:
               evaluated = self._train_epoch(sess,
                                             next_batch_valid,
                                             iter_valid,
@@ -556,7 +610,7 @@ class Simulator: # pylint: disable=too-many-instance-attributes
         data = tf.data.Dataset.from_tensor_slices({
             'x':train_data,
             'y':train_labels
-            }).batch(self._batch_size)
+            }).shuffle(train_data.shape[0]).batch(self._batch_size)
         iterator = data.make_initializable_iterator()
         
         data = tf.data.Dataset.from_tensor_slices({
@@ -576,7 +630,9 @@ class Simulator: # pylint: disable=too-many-instance-attributes
 
     step = 1
 
-    with tf.Session(graph=g.get_tf_graph()) as sess:
+    config = tf.ConfigProto(allow_soft_placement=True)
+
+    with tf.Session(graph=g.get_tf_graph(), config=config) as sess:
       _ = sess.run([iterator.initializer,
                     iter_valid.initializer,
                     iter_test.initializer,
@@ -817,7 +873,9 @@ class Simulator: # pylint: disable=too-many-instance-attributes
 
     step = 0
 
-    with tf.Session(graph=g.get_tf_graph()) as sess:
+    config = tf.ConfigProto(allow_soft_placement=True)
+
+    with tf.Session(graph=g.get_tf_graph(), config=config) as sess:
       _ = sess.run([iterator.initializer,
                     iter_valid.initializer,
                     iter_test.initializer,
@@ -1058,11 +1116,10 @@ class Simulator: # pylint: disable=too-many-instance-attributes
                 loss,
                 accept_ratio):
     """Helper for logs during training."""
-    names = ['epoch:'+str(epoch),
-             'step:'+str(step),
-             'loss:'+str(loss),
-             'accept_proba:'+str(accept_ratio)]
-    buff = ', '.join(names) + '       '
+
+    buff = "[epoch:{0}]|[step:{1}]|[{2}]|[accept:{3:.3f}]".format(
+        epoch, step, ', '.join(['{0:.3f}'.format(l) for l in loss]), accept_ratio)
+
 
     self.stdout_write(buff)
 

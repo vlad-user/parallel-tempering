@@ -15,6 +15,18 @@ from simulator.exceptions import InvalidExperimentValueError
 DTYPE = tf.float32
 TRAIN_FREQ = 2
 
+def generate_proba_coeffs(noise_list, mult=1.):
+  """Generates probability coefficients s.t `coeff*(beta_i-beta_j)=const`"""
+  n_replicas = len(noise_list)
+  betas = sorted([1/n for n in noise_list])
+  diffs = [betas[i] - betas[i+1] for i in range(n_replicas - 1)]
+  coeffs = [1.]
+  for i in range(1, n_replicas - 1):
+    coeffs.append(coeffs[i-1]*(diffs[i-1]/diffs[i]))
+
+  return [c*mult for c in coeffs]
+
+
 class Timer:
   """Helper for measuring simulation time."""
   def __init__(self):
@@ -76,7 +88,7 @@ def generate_experiment_name(model_name=None,
   loss_func_name = loss_func_name.replace('_', '')
   # pylint:disable=too-many-boolean-expressions
   if ((model_name is None or not isinstance(model_name, str))
-      or (dataset_name is None or  dataset_name not in ['mnist', 'cifar'])
+      or (dataset_name is None or  dataset_name not in ['mnist', 'cifar', 'emnist'])
       or (separation_ratio is None)
       or (do_swaps is None or do_swaps not in [True, False, 'True', 'False'])
       or (n_replicas is None)

@@ -104,6 +104,27 @@ class Optimizer:
     """Should be overriden in subclasses if necessary."""
     pass
 
+class NormalNoiseGDOptimizer_v2:
+  def __init__(self, learning_rate, stddev):
+    self.learning_rate = learning_rate
+    self.stddev = stddev
+
+  def minimize(self, loss):
+    self.trainable_variables = _get_dependencies(loss)
+    grads = tf.gradients(loss, self.trainable_variables)
+    values = [w - self.learning_rate * g + tf.random.normal(w.shape, stddev=self.stddev)
+              for g, w in zip(grads, self.trainable_variables)]
+    update_ops = [tf.assign(w, v) for w, v in zip(self.trainable_variables, values)]
+
+    self.train_op = tf.group(update_ops)
+    return self.get_train_op()
+
+  def set_train_route(self, route):
+    return 
+
+  def get_train_op(self, *args, **kwargs):
+    return self.train_op
+
 class NormalNoiseGDOptimizer(Optimizer):
   """Optimizer that adds random noise during training."""
   def __init__(self, learning_rate, replica_id, noise_list):
@@ -181,6 +202,30 @@ class GDOptimizer(Optimizer):
   def __init__(self, learning_rate, replica_id, noise_list=None):
     super(GDOptimizer, self).__init__(
         learning_rate, replica_id, noise_list)
+
+class MomentumOptimizer:
+  """Wrapper for momentum optimizer."""
+  def __init__(self, learning_rate, replica_id, noise_list=None, momentum=0.9):
+    self.optimizer = tf.train.MomentumOptimizer(learning_rate, momentum)
+    self.train_op = None
+    self.trainable_variables = None
+    self.replica_id = replica_id
+
+  def minimize(self, loss):
+    self.trainable_variables = _get_dependencies(loss)
+    with tf.device(_gpu_device_name(self.replica_id)):
+      self.train_op = self.optimizer.minimize(loss, var_list=self.trainable_variables)
+    return self.train_op
+
+  def get_train_op(self,):
+    """Returns the current training op."""
+    if self.train_op is None:
+      raise ValueError('train_op is not set. Call minimize() to set.')
+    return self.train_op
+
+  def set_train_route(self, route): # pylint: disable=unused-argument, no-self-use
+    """Doesn't do anything. Added for consistency with other optimizers."""
+    return
 
 class RMSPropOptimizer(Optimizer):
   """Wrapper for tf.train.RMSPropOptimizer."""
@@ -297,5 +342,5 @@ def _get_dependencies(tensor):
         if op_in.op not in visited:
           queue.append(op_in.op)
           visited.add(op_in.op)
-
+  variables = [v for v in variables if v.trainable]
   return list(reversed(variables))

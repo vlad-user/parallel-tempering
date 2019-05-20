@@ -50,6 +50,11 @@ class Summary:
     self._moa_test_err = []
     self._moa_valid_err = []
     self._moa_weights = {i:[] for i in range(self._n_replicas)}
+    self._debug = {
+      'probas': {},
+      'exp_args': {},
+      'exp_args_coeff': {}
+    }
     if diffusion_ops is None:
       self._diffusion_ops = self._create_diffusion_ops(optimizers)
     else:
@@ -249,7 +254,8 @@ class Summary:
         'moa_train_steps': self._moa_train_steps,
         'moa_test_steps': self._moa_test_steps,
         'moa_validation_steps': self._moa_valid_steps,
-        'moa_weights': self._moa_weights
+        'moa_weights': self._moa_weights,
+        'debug': self._debug
     }
 
     if 'win' in sys.platform:

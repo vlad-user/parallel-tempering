@@ -644,6 +644,7 @@ class SummaryReportGenerator:
           y-axis for error plots.
         ylim_loss: Tuple of two numbers specifying the limit for
           y-axis for loss plots.
+        epoch_range: 
 
      **TODO**: make separate yaxis_cycle for error and loss.
     """
@@ -676,7 +677,9 @@ class SummaryReportGenerator:
     self.higher = higher
     self.ylim_err = kwargs.get('ylim_err', (0, 1))
     self.ylim_loss = kwargs.get('ylim_loss', (0, 5))
-
+    epoch_range = (kwargs.get('epoch_range', None)
+                  or (0, max(se.get_description()['n_epochs'] for se in self._summ_ext.values()))) 
+    self.epoch_range = epoch_range
   def generate_report(self, custom_text="Results"):
     """Generates pdf file with report for for multiple individual simulations.
 
@@ -694,7 +697,8 @@ class SummaryReportGenerator:
     with doc.create(tex.Figure(position=self._position)) as plot_:
       imgpath = self._plot_train_test_min_error(self._sample_every,
                                                 self._simulation_num,
-                                                ylim=self.ylim_err)
+                                                ylim=self.ylim_err,
+                                                xlim=self.epoch_range)
       plot_.add_image(imgpath)
       caption = 'Train-test min error'
       if self._include_fnames:
@@ -730,6 +734,7 @@ class SummaryReportGenerator:
         caption += '. Filename: ' + imgpath.split(self._pathdelim)[-1]
       plot_.add_caption(caption)
 
+    doc.append(tex.basic.NewPage())
 
     #################### Plots with diffusion ####################
     for name, se in self._summ_ext.items():
@@ -802,6 +807,8 @@ class SummaryReportGenerator:
         plot_.add_caption(caption)
       plt.close()
 
+    doc.append(tex.basic.NewPage())
+
     #################### Plots of temperature mixing ####################
     for name, se in self._summ_ext.items():
       with doc.create(tex.Figure(position=self._position)) as plot_:
@@ -858,6 +865,7 @@ class SummaryReportGenerator:
 
     #################### MOA weights values ####################
     if any(('mode' in se.get_description()
+            and se.get_description()['mode'] is not None
             and 'moa' == se.get_description()['mode'].lower())
             for name, se in self._summ_ext.items()):
       for name, se in self._summ_ext.items():
@@ -1165,6 +1173,7 @@ class SummaryReportGenerator:
       se = self._summ_ext[name]
       if (se.get_description()['n_replicas'] != 1
           and 'mode' in se.get_description()
+          and se.get_description()['mode'] is not None
           and se.get_description()['mode'].lower() == 'moa'):
         train_label = se.get_name() + ' Train error (MOA)'
         test_label = se.get_name() + ' Test error (MOA)'
@@ -1269,6 +1278,7 @@ class SummaryReportGenerator:
       se = self._summ_ext[name]
       if (se.get_description()['n_replicas'] != 1
           and 'mode' in se.get_description()
+          and se.get_description()['mode'] is not None
           and se.get_description()['mode'].lower() == 'moa'):
 
         train_label = se.get_name() + ' Train loss (MOA)'
@@ -1886,8 +1896,11 @@ class SummaryReportGenerator:
         vals_['Mixing'].append("{0:.3f}".format(se.get_mix_ratio()))
         vals_['Visit'].append("{0:.3f}".format(se.get_visit_ratio()))
         sep, err, std = se.get_sep_ratio_vs_min_error()
-        vals_['Err'].append("{0:.3f}".format(err))
-        vals_['MoaErr'].append("{0:.3f}".format(se.get_moa_min_err()))
+        vals_['Err'].append("{0:.5f}".format(err))
+        if 'moa' == desc['mode']:
+          vals_['MoaErr'].append("{0:.3f}".format(se.get_moa_min_err()))
+        else:
+          vals_['MoaErr'].append('NaN')
         vals_['BurnIn'].append(str(desc['burn_in_period']))
         vals_['Name'].append(se.get_name())
         vals_['Swap'].append(str(desc['swap_step']))
@@ -1902,7 +1915,14 @@ class SummaryReportGenerator:
         vals_['DSize'].append(train_data_size)
         vals_['#params'].append(desc['n_params'])
         for k in vals_:
-          vals_[k] = list(set(vals_[k]))
+          if k != 'Coeff':
+            vals_[k] = list(set(vals_[k]))
+          else:
+            try:
+              vals_[k] = list(set(vals_[k]))
+            except TypeError:
+              vals_[k] = [desc['proba_coeff'][0]]
+
         row = []
         for col_name in col_names:
           if len(vals_[col_name]) == 1:
@@ -1921,7 +1941,9 @@ class SummaryExtractor:
     self._dirname = os.path.join(dirname, 'summaries', name)
     filenames = sorted([f for f in os.listdir(self._dirname) if 'summary' in f],
                        key=lambda x: int(x.split('_')[1].split('.')[0]))
+    
     description_path = os.path.join(self._dirname, 'description.json')
+
     self._summaries = []
     self._n_simulations = len(filenames)
     self._include_moa = include_moa
@@ -1986,6 +2008,7 @@ class SummaryExtractor:
     """
 
     sep = self.get_description()['separation_ratio']
+
     if self._vals['avg_err_differ'] is not None:
       err_differ = self._vals['avg_err_differ']
       err_differ_std = self._vals['avg_err_differ_err']
@@ -2014,7 +2037,10 @@ class SummaryExtractor:
                                            simulation_num=s)
 
         idx_test = np.argmin(test_y)
-        idx_train = _find_nearest_idx(train_steps, test_steps[idx_test])
+        try:
+          idx_train = _find_nearest_idx(train_steps, test_steps[idx_test])
+        except IndexError:
+          idx_train = 0
         differ = test_y[idx_test] - train_y[idx_train]
         reps[r].append(differ)
         err_differs.append(differ)
@@ -2159,7 +2185,28 @@ class SummaryExtractor:
       print('Mixing Ratio:', mix, '+/-', stddev)
 
       sep, loss_val, loss_err = self.get_sep_ratio_vs_min_error()
-      print('Min Error value:', loss_val, '+/-', loss_err)
+      _ = self.get_sep_ratio_vs_min_error()
+      min_rid = self._vals['replica_id_min_err_sim_' + str(simulation_num)]
+      print('Min Error value:', loss_val, '+/-', loss_err, 'for replica', min_rid)
+      test_errs, valid_errs, train_errs = [],  [], []
+      for r in range(self.get_description()['n_replicas']):
+        x, y = self.get_summary('test_error', simulation_num=simulation_num, replica_id=r)
+        test_errs.append((min(y), x[np.argmin(y)], r))
+        x, y = self.get_summary('train_error', simulation_num=simulation_num, replica_id=r)
+        train_errs.append((min(y), x[np.argmin(y)], r))
+        x, y = self.get_summary('validation_error', simulation_num=simulation_num, replica_id=r)
+        valid_errs.append((min(y), x[np.argmin(y)], r))
+      zipped = zip(test_errs, valid_errs, train_errs)
+      combined = [list(x) for x in zip(*sorted(zipped, key=lambda pair: pair[0][0]))]
+      test_errs, valid_errs, train_errs = combined
+      for i in range(self.get_description()['n_replicas']):
+        buff = '[rid:{0}]|[test:{1:.5f} at {2}]|[valid:{3:.5f} at {4}]|[train:{5:.5f} at {6}]'.format(
+            test_errs[i][-1], test_errs[i][0], int(test_errs[i][1]),
+            valid_errs[i][0], int(valid_errs[i][1]),
+            train_errs[i][0], int(train_errs[i][1]))
+        print(buff)
+
+      print('Min Valid Error value:', min(self.get_summary('validation_error')[1]))
       if ('mode' in self.get_description()
           and self.get_description()['mode'] is not None
           and 'moa' in self.get_description()['mode'].lower()):
@@ -2181,6 +2228,11 @@ class SummaryExtractor:
                         sample_every=sample_every,
                         include_moa=self._include_moa)
     _ = self._plot_error(summ_name='test_error',
+                         simulation_num=simulation_num,
+                         sample_every=sample_every,
+                         include_moa=self._include_moa,
+                         ylim=(0, 0.2))
+    _ = self._plot_error(summ_name='validation_error',
                          simulation_num=simulation_num,
                          sample_every=sample_every,
                          include_moa=self._include_moa)
@@ -2398,14 +2450,14 @@ class SummaryExtractor:
       plot.plot(x, y, fig=fig, ax=ax, label=label, linewidth=1., linestyle=linestyle,
                 color=self._moa_color)
     for r in range(self._n_replicas):
-      if summ_name == 'test_error':
-        x, y = self.get_summary('test_error', r, simulation_num)
+      if 'test' in summ_name or 'validation' in summ_name:
+        x, y = self.get_summary(summ_name, r, simulation_num)
         plot.plot(x, y, fig=fig, ax=ax, label='Test error (replica ' + str(r) + ')',
                   linewidth=1, color=self._colors[r])
         #x = x[::sample_every]
         #y = y[::sample_every]
-      elif summ_name == 'train_error':
-        x1, y1 = self.get_summary('train_error', r, simulation_num)
+      elif 'train' in summ_name:
+        x1, y1 = self.get_summary(summ_name, r, simulation_num)
         #y1 = [(a + b) / 2 for a, b in zip(y1[::2], y1[1::2])]
         #y1 = y1[::sample_every]
         x1 = np.linspace(start=0, stop=x1[-1], num=len(y1))
@@ -3074,6 +3126,28 @@ class SummaryExtractor:
     plot.legend(fig, ax, xlabel='EPOCHS', ylabel=summ_name.replace('_', '-'))
     return fig
 
+  def _proba_if_coeff_was(self, coeff=None, simulation_num=0):
+    debug = self._summaries[simulation_num]['debug']
+    pairs = self._get_swap_pairs(simulation_num)
+    coeff = coeff or self.get_description()['proba_coeff']
+    noise_list = self.get_description()['noise_list']
+    betas = [1/n for n in noise_list] 
+    if not isinstance(coeff, list):
+      coeff = [coeff for _ in range(self.get_description()['n_replicas'] - 1)]
+    pairs_coeffs = {p: c for p, c in zip(pairs, coeff)}
+    for i, p in enumerate(pairs):
+      probas = []
+      exp_args = debug['exp_args'][p]
+      for exp_arg in exp_args:
+        proba = min(1, np.exp(pairs_coeffs[p]*exp_arg))
+        probas.append(proba)
+
+      print(i, p, '--->', np.mean(probas), np.std(probas))
+
+  def _get_swap_pairs(self, simulation_num=0):
+    """Returns a tuples of adjacent temperatures (temp_i, temp_i+1)."""
+    debug = self._summaries[simulation_num]['debug']
+    return list(sorted(debug['exp_args'].keys(), reverse=True))
 
 def _find_nearest_idx(array, value):
   """Returns the index of the closest to the `value` value in `array`."""
