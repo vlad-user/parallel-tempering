@@ -2236,8 +2236,12 @@ class SummaryExtractor:
                          simulation_num=simulation_num,
                          sample_every=sample_every,
                          include_moa=self._include_moa)
-    _ = self._plot_moa_weights(simulation_num=simulation_num)
+    try:
+      _ = self._plot_moa_weights(simulation_num=simulation_num)
+    except KeyError:
+      pass
     _ = self._plot_test_err_vs_noise_level_vs_epochs(simulation_num=simulation_num)
+
     _ = self._plot_diffusion_vs_min_error(simulation_num=simulation_num,
                                           sample_every=sample_every)
     _ = self._plot_diffusion_vs_min_loss(simulation_num=simulation_num,
@@ -3081,7 +3085,7 @@ class SummaryExtractor:
 
   def _plot_mixing(self, simulation_num=0):
     def _get_key(key):
-      keys = [float("{0:.5f}".format(b))
+      keys = [float("{0:.7f}".format(b))
               for b in self.get_description()['noise_list']]
       return keys[int(np.argmin([abs(k-key) for k in keys]))]
 
@@ -3104,6 +3108,68 @@ class SummaryExtractor:
     return fig
 
   ##################### Experimental #####################
+
+  def _plot_mixing_resnet(self, simulation_num=0):
+    FONTSIZE = 25
+    def get_min_err_and_rid(se):
+      results = []
+      for r in range(se.get_description()['n_replicas']):
+          x, y = se.get_summary('test_error', replica_id=r)
+          results.append(min(y))
+      min_err = min(results)
+      min_rid = np.argmin(results)
+      return min_err, min_rid
+    def _get_key(key):
+      lr = self.get_description()['learning_rate']
+      noise_list = self.get_description()['noise_list'] + [lr]
+      noise_list = sorted(noise_list)
+      keys = [float("{0:.5f}".format(b)) for b in noise_list]
+      return keys[int(np.argmin([abs(k-key) for k in keys]))]
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    lr = self.get_description()['learning_rate']
+    noise_list = self.get_description()['noise_list'] + [lr]
+    noise_list = sorted(noise_list)
+    key_map = {_get_key(key):i for i, key in enumerate(noise_list)}
+    dsize = 45000
+    batch_size = self.get_description()['batch_size']
+    epoch_mult = np.ceil(dsize/batch_size)
+    n_epochs = self.get_description()['n_epochs']
+    n_replicas = self.get_description()['n_replicas']
+    _, min_rid = get_min_err_and_rid(self)
+    for r in range(self._n_replicas):
+      x, y = self.get_summary('noise_values', replica_id=r, simulation_num=simulation_num)
+      x = x*epoch_mult
+      y_new = [key_map[_get_key(i)] for i in y]
+      if r == min_rid:
+        linewidth = 15
+        ax.plot(x, y_new, label='replica ' + str(r), linewidth=linewidth, color='grey', alpha=0.8,
+          linestyle='-')
+      else: 
+        linewidth = 2
+
+      ax.plot(x, y_new, label='replica ' + str(r), linewidth=4.5)
+    ylabels = [float("{0:.5f}".format(b)) for b in noise_list] + [float("{0:.5f}".format(lr))]
+    yticks = list(range(n_replicas + 1))
+    xticks = [25000, 30000, 40000, 50000, 60000]
+    xlabels = ['0', '30K', '40K', '50K', '60K']
+    
+
+    xticks_locs = [25000, n_epochs*epoch_mult]
+    yticks_locs = [[i, i] for i in range(n_replicas)]
+    for r in range(n_replicas):
+      ax.plot(xticks_locs, yticks_locs[r], color='black', linestyle='--', dashes=(4, 6), linewidth=2)
+      continue
+
+    plt.xlim((25000, n_epochs*epoch_mult))
+
+    plt.xticks(xticks, xlabels, fontsize=23)
+    plt.yticks(yticks, ylabels, fontsize=23)
+    
+    #plt.gca().set_yticklabels(['0'] + yticks_names)
+    #plot.legend(fig, ax, legend_title='Replica',
+    #            xlabel='EPOCHS', ylabel='NOISE LEVEL')
+    return fig, ax
 
   def _plot_bestsofar(self, summ_name='validation_loss', simulation_num=0):
 

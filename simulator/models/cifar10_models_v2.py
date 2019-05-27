@@ -109,9 +109,7 @@ def lenet5_with_dropout(graph):
       with tf.name_scope('inputs'):
         x = tf.placeholder(DTYPE, shape=(None, 32, 32, 3))
         y = tf.placeholder(tf.int32, shape=(None))
-        keep_prob = tf.placeholder_with_default(input=1.0,
-                                                shape=(),
-                                                name='keep_prob')
+        keep_prob = tf.placeholder(tf.float32, shape=(), name='keep_prob')
 
       with tf.name_scope('conv1'):
         conv1 = tf.layers.conv2d(x,
@@ -158,6 +156,7 @@ def lenet5_with_dropout(graph):
                                  kernel_initializer=DEFAULT_INITIALIZER)
       with tf.name_scope('fc1'):
         flattened = tf.layers.Flatten()(conv3)
+        flattened = tf.nn.dropout(flattened, keep_prob)
         fc1 = tf.layers.dense(flattened, 84, activation=tf.nn.relu, kernel_initializer=DEFAULT_INITIALIZER)
         fc1 = tf.nn.dropout(flattened, keep_prob)
 
@@ -306,7 +305,7 @@ def lenet5(graph,):
   return x, y, istrain, logits
 
 def lenet5_l2_with_const_dropout(graph):
-  x, y, istrain, _, logits = lenet5_lr_with_const_dropout(graph, keep_prob=0.7)
+  x, y, istrain, _, logits = lenet5_lr_with_const_dropout(graph, keep_prob=1.0)
   return x, y, istrain, logits
 
 def lenet5_with_input_noise(graph, verbose=False):
