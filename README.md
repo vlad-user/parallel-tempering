@@ -12,7 +12,7 @@
 * [Seaborn](https://seaborn.pydata.org/)
 
 ### Reproduction of results
-To reproduce the plots from the paper follow instruction at `reproduce_results` subdirectory.
+To reproduce the plots from the paper follow instruction at `paper_results` subdirectory.
 
 ## Examples
 
