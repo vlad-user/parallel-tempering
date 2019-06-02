@@ -351,14 +351,14 @@ def get_emnist_letters(fname='emnist-letters-from-src.pkl'):
     
     if not os.path.exists(dst_path):
       os.makedirs(dst_path)
-    dst_path = os.path.join(dst_path, 'gzip', 'gzip')
+    dst_path = os.path.join(dst_path)
     fnames_dict = {
       'x_test': 'emnist-letters-test-images-idx3-ubyte.gz',
       'y_test': 'emnist-letters-test-labels-idx1-ubyte.gz',
       'x_train': 'emnist-letters-train-images-idx3-ubyte.gz',
       'y_train': 'emnist-letters-train-labels-idx1-ubyte.gz'
       }
-    fullpaths = {k: os.path.join(dst_path, v) for k, v in fnames_dict.items()}
+    fullpaths = {k: os.path.join(dst_path, 'gzip', v) for k, v in fnames_dict.items()}
     
     for attempt in range(5):
       try:
