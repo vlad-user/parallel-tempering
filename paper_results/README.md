@@ -12,21 +12,22 @@ To reproduce the result just run each individual file. The resulted plots will b
 ### Lenet5 | varying dropout vs fixed dropout | CIFAR-10 dataset
 ```
 python lenet5_cifar10_dropout.py
-```
-![](_images/cifar-dropout.png)
 
+```
+<img src="_images/cifar-dropout.png" width="120" height="80">
 ### Lenet5 | varying dropout vs fixed dropout | EMNIST-letters dataset
 ```
 python lenet5_emnist_dropout.py
 ```
-![](_images/emnist-dropout.png)
+<img src="_images/emnist-dropout.png" width="120" height="80">
 ### Lenet5 | varying learning rate vs fixed learning rate | CIFAR-10 dataset
 ```
 python lenet5_cifar10_learning_rate.py
 ```
-![](._images/cifar-lr.png)
+<img src="_images/cifar-lr.png" width="120" height="80">
 ### Lenet5 | varying learning rate vs fixed learning rate | EMNIST-letters dataset
 ```
 python lenet5_emnist_learning_rate.py
 ```
-![](._images/emnist-lr.png)
+<img src="_images/emnist-lr.png" width="120" height="80">
+
