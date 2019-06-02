@@ -25,8 +25,8 @@ train_data_size = 112320
 model = lenet5_lr_with_const_dropout
 model_name = 'lenet5'
 description = 'reproduction of results'
-beta_0 = .011
-beta_n = .006
+beta_0 = .012
+beta_n = .007
 proba_coeff = 60000
 batch_size = 128
 burn_in_period_list = [25000, np.inf] # <-- simulate with and without swaps
@@ -62,7 +62,8 @@ for burn_in_period in burn_in_period_list:
                                           train_data_size=train_data_size,
                                           version='v5')
   names.append(name)
-  scheduled_lr = {1: 0.1, 62000: 0.01} # annealing of learning rate
+  scheduled_noise = {1:[0.1 for _ in range(n_replicas)],
+                     62000: noise_list}
 
   sim = Simulator(model=model,
                   learning_rate=learning_rate,
@@ -72,7 +73,7 @@ for burn_in_period in burn_in_period_list:
                   name=name,
                   burn_in_period=burn_in_period,
                   noise_type=noise_type,
-                  scheduled_lr=scheduled_lr,
+                  scheduled_noise=scheduled_noise,
                   swap_step=swap_step,
                   separation_ratio=0,
                   n_simulations=1,

@@ -12,7 +12,8 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle as shuffle_dataset
 import tensorflow as tf
-import tensorflow_datasets as tfds
+
+EMNIST_URL = 'http://www.itl.nist.gov/iaui/vip/cs_links/EMNIST/gzip.zip'
 
 class Cifar10: # pylint: disable=too-many-instance-attributes, too-few-public-methods, missing-docstring
 
@@ -324,72 +325,9 @@ def _create_cifar_data_or_get_existing_lenet5():
       pickle.dump(obj, fo, protocol=pickle.HIGHEST_PROTOCOL)
   return x_train, y_train, x_test, y_test, x_valid, y_valid
 
-def _create_emnist_data_or_get_existing(fname='emnist-letters.pkl'):
-  # store exact same split for feature simulations or load already existing
-  dirname = os.path.dirname(__file__)
-  dirname = os.path.join(dirname, 'data')
-
-  if not os.path.exists(dirname):
-    os.makedirs(dirname)
-  fname = os.path.join(dirname, fname)
-  if os.path.exists(fname):
-    with open(fname, 'rb') as fo:
-      obj = pickle.load(fo)
-    x_train = obj['x_train']
-    y_train = obj['y_train']
-    x_test = obj['x_test']
-    y_test = obj['y_test']
-    x_valid = obj['x_valid']
-    y_valid = obj['y_valid']
-  else:
-
-    builder = tfds.builder('emnist/letters')
-    builder.download_and_prepare()
-    datasets = builder.as_dataset()
-    train_data, test_data = datasets['train'], datasets['test']
-
-    x_train, x_test, y_train, y_test = [], [], [], []
-
-    for x in tfds.as_numpy(train_data):
-      x_train.append(x['image'][None, ...])
-      y_train.append(x['label'][None, ...])
-
-    for x in tfds.as_numpy(test_data):
-      x_test.append(x['image'][None, ...])
-      y_test.append(x['label'][None, ...])
-
-    x_train = np.concatenate(x_train, axis=0)
-    y_train = np.concatenate(y_train, axis=0)
-    x_test = np.concatenate(x_test, axis=0)
-    y_test = np.concatenate(y_test, axis=0)
-
-    x_train, x_test = x_train / 255., x_test / 255.
-
-    x_train, y_train = shuffle_dataset(x_train, y_train)
-    x_train, x_valid, y_train, y_valid = train_test_split(x_train,
-                                                          y_train,
-                                                          test_size=0.1)
-    # per-pixel mean subtraction
-    mean = np.mean(x_train, axis=0)[None, ...]
-    x_train = x_train - mean
-    x_test = x_test - mean
-    x_valid = x_valid - mean
-
-    with open(fname, 'wb') as fo:
-      obj = {
-        'x_train': x_train, 
-        'y_train': y_train,
-        'x_test': x_test,
-        'y_test': y_test,
-        'x_valid': x_valid,
-        'y_valid': y_valid
-      }
-      pickle.dump(obj, fo, protocol=pickle.HIGHEST_PROTOCOL)
-  return x_train, y_train, x_test, y_test, x_valid, y_valid
-
-
 def get_emnist_letters(fname='emnist-letters-from-src.pkl'):
 
+  _maybe_download_emnist()
   dirname = os.path.dirname(__file__)
   dirname = os.path.join(dirname, 'data')
   fname = os.path.join(dirname, fname)
@@ -476,3 +414,56 @@ def get_emnist_letters(fname='emnist-letters-from-src.pkl'):
       pickle.dump(obj, fo, protocol=pickle.HIGHEST_PROTOCOL)
 
   return x_train, y_train, x_test, y_test, x_valid, y_valid
+
+def _maybe_download_emnist():
+  return 
+  gzip_path = os.path.dirname(__file__)
+  gzip_path = os.path.join(gzip_path, 'data')
+  dst_path = os.path.join(gzip_path, 'emnist_extracted')
+  gzip_path = os.path.join(gzip_path, 'gzip.zip')
+  filepath = gzip_path
+  if os.path.exists(gzip_path):
+    return
+  def _progress(count, block_size, totol_size):
+    buff = '\r>> Downloading %s %1.f%%' % (
+        filename, float(count * block_size) / float(total_size) * 100.)
+    sys.stdout.write(buff)
+    sys.stdout.flush()
+
+  filepath, _ = urllib.request.urlretreive(
+    EMNIST_URL, filepath, _progress)
+  print()
+  statinfo = os.stat(filepath)
+  print('Successfully downloaded emnist dataset', statinfo.st_size, 'bytes.')
+'''
+  def _download_and_extract(self):
+    """Download from https://www.cs.toronto.edu/~kriz/cifar.html if the
+    the file is not located in the path"""
+    if not os.path.exists(self.data_dir):
+      os.makedirs(self.data_dir)
+    dest_directory = self.cifar10_dir
+
+    if not os.path.exists(dest_directory):
+      os.makedirs(dest_directory)
+
+    filename = self.DATA_URL.split('/')[-1]
+    filepath = os.path.join(dest_directory, filename)
+
+
+    if not os.path.exists(filepath):
+      def _progress(count, block_size, total_size):
+        sys.stdout.write(
+            '\r>> Downloading %s %.1f%%' % (filename,
+            float(count * block_size) / float(total_size) * 100.0))
+        sys.stdout.flush()
+
+      filepath, _ = urllib.request.urlretrieve(
+          self.DATA_URL, filepath, _progress)
+      print()
+      statinfo = os.stat(filepath)
+      print('Successfully downloaded', filename, statinfo.st_size, 'bytes.')
+    extracted_dir_path = os.path.join(dest_directory, 'cifar-10-batches-py')
+    if not os.path.exists(extracted_dir_path):
+      tarfile.open(filepath, 'r:gz').extractall(dest_directory)
+    self.cifar10_dir = extracted_dir_path
+'''

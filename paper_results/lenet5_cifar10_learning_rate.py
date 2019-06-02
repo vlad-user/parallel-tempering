@@ -11,7 +11,7 @@ from scipy.ndimage.filters import gaussian_filter1d
 from simulator import read_datasets
 from simulator.simulator import Simulator
 from simulator.summary_extractor import SummaryExtractor
-from simulator.models.cifar10_models_v2 import lenet5_lr_with_dropout
+from simulator.models.cifar10_models_v2 import lenet5_lr_with_const_dropout
 from simulator import simulator_utils as s_utils
 
 
@@ -29,14 +29,14 @@ beta_0 = .016
 beta_n = .006
 proba_coeff = 101000
 batch_size = 128
-burn_in_period_list = [10000, np.inf] # <-- simulate with and without swaps
+burn_in_period_list = [25000, np.inf] # <-- simulate with and without swaps
 swap_step = 600
 mode = None 
 test_step = 352 # <-- number of steps between computations of test error
 timer = s_utils.Timer()
 
 x_train, y_train, x_test, y_test, x_valid, y_valid = (
-    read_datasets.get_emnist_letters())
+    read_datasets._create_cifar_data_or_get_existing_lenet5())
 
 timer = s_utils.Timer()
 names = [] # <-- stores simulation names
@@ -62,7 +62,8 @@ for burn_in_period in burn_in_period_list:
                                           train_data_size=train_data_size,
                                           version='v5')
   names.append(name)
-  scheduled_lr = {1: 0.1, 25000: 0.01} # annealing of learning rate
+  scheduled_noise = {1:[0.1 for _ in range(n_replicas)],
+                     25000: noise_list}
 
   sim = Simulator(model=model,
                   learning_rate=learning_rate,
@@ -72,7 +73,7 @@ for burn_in_period in burn_in_period_list:
                   name=name,
                   burn_in_period=burn_in_period,
                   noise_type=noise_type,
-                  scheduled_lr=scheduled_lr,
+                  scheduled_noise=scheduled_noise,
                   swap_step=swap_step,
                   separation_ratio=0,
                   n_simulations=1,
@@ -111,8 +112,8 @@ def apply_filter(x, y, sigma=1):
     return x, ynew
 
 EPOCH_MULT = np.ceil(train_data_size/batch_size)
-xticks = [50000, 100000, 150000, 200000, 250000, 300000, 350000]
-xlabels = ['50K', '100K', '150K', '200K', '250K', '300K', '350K']
+xticks = [20000, 40000, 60000, 80000, 100000, 120000, 140000]
+xlabels = ['20K', '40K', '60K', '80K', '100K', '120K', '140K']
 LINEWIDTH = 5
 TLINEWIDTH = 3
 alpha = 0.35
@@ -220,7 +221,7 @@ dirname = os.path.join(cwd, 'paper_results', 'plots')
 if not os.path.exists(dirname):
   os.makedirs(dirname)
 
-path = os.path.join(dirname, 'emnist-learning_rate.eps')
+path = os.path.join(dirname, 'cifar-learning_rate.eps')
 
 plt.savefig(path, bbox_inches='tight')
 #plt.show()

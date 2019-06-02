@@ -36,7 +36,7 @@ test_step = 352 # <-- number of steps between computations of test error
 timer = s_utils.Timer()
 
 x_train, y_train, x_test, y_test, x_valid, y_valid = (
-    read_datasets.get_emnist_letters())
+    read_datasets._create_cifar_data_or_get_existing_lenet5())
 
 timer = s_utils.Timer()
 names = [] # <-- stores simulation names
@@ -93,6 +93,7 @@ for burn_in_period in burn_in_period_list:
   gc.collect()
   print()
   log = 'Time took: {0:.3f}'.format(timer.elapsed_time())
+  print(log)
 
 SAMPLE_EVERY = 1
 
@@ -111,8 +112,8 @@ def apply_filter(x, y, sigma=1):
     return x, ynew
 
 EPOCH_MULT = np.ceil(train_data_size/batch_size)
-xticks = [50000, 100000, 150000, 200000, 250000, 300000, 350000]
-xlabels = ['50K', '100K', '150K', '200K', '250K', '300K', '350K']
+xticks = [20000, 40000, 60000, 80000, 100000, 120000, 140000]
+xlabels = ['20K', '40K', '60K', '80K', '100K', '120K', '140K']
 LINEWIDTH = 5
 TLINEWIDTH = 3
 alpha = 0.3
