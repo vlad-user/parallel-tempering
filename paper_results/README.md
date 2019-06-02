@@ -13,7 +13,7 @@ To reproduce the result just run each individual file. The resulted plots will b
 ```
 python lenet5_cifar10_dropout.py
 ```
-![](._images/cifar-dropout.png)
+![](_images/cifar-dropout.png)
 
 ### Lenet5 | varying dropout vs fixed dropout | EMNIST-letters dataset
 ```
