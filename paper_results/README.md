@@ -19,7 +19,7 @@ python lenet5_cifar10_dropout.py
 ```
 python lenet5_emnist_dropout.py
 ```
-![](._images/emnist-dropout.png)
+![](_images/emnist-dropout.png)
 ### Lenet5 | varying learning rate vs fixed learning rate | CIFAR-10 dataset
 ```
 python lenet5_cifar10_learning_rate.py
