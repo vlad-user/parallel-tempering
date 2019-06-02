@@ -4,6 +4,7 @@ import tarfile
 import random
 import sys
 from six.moves import urllib
+import urllib.request
 import pickle
 import gzip
 import zipfile
@@ -328,7 +329,7 @@ def _create_cifar_data_or_get_existing_lenet5():
 def get_emnist_letters(fname='emnist-letters-from-src.pkl'):
 
   _maybe_download_emnist()
-  dirname = os.path.dirname(__file__)
+  dirname = os.path.dirname(os.path.abspath(__file__))
   dirname = os.path.join(dirname, 'data')
   fname = os.path.join(dirname, fname)
   if os.path.exists(fname):
@@ -343,14 +344,14 @@ def get_emnist_letters(fname='emnist-letters-from-src.pkl'):
 
 
   else:
-    gzip_path = os.path.dirname(__file__)
+    gzip_path = os.path.dirname(os.path.abspath(__file__))
     gzip_path = os.path.join(gzip_path, 'data')
     dst_path = os.path.join(gzip_path, 'emnist_extracted')
     gzip_path = os.path.join(gzip_path, 'gzip.zip')
     
     if not os.path.exists(dst_path):
       os.makedirs(dst_path)
-    dst_path = os.path.join(dst_path, 'gzip')
+    dst_path = os.path.join(dst_path, 'gzip', 'gzip')
     fnames_dict = {
       'x_test': 'emnist-letters-test-images-idx3-ubyte.gz',
       'y_test': 'emnist-letters-test-labels-idx1-ubyte.gz',
@@ -358,10 +359,23 @@ def get_emnist_letters(fname='emnist-letters-from-src.pkl'):
       'y_train': 'emnist-letters-train-labels-idx1-ubyte.gz'
       }
     fullpaths = {k: os.path.join(dst_path, v) for k, v in fnames_dict.items()}
-
-    zip_ref = zipfile.ZipFile(gzip_path)
-    zip_ref.extractall(dst_path)
-    zip_ref.close()
+    
+    for attempt in range(5):
+      try:
+        zip_ref = zipfile.ZipFile(gzip_path)
+        zip_ref.extractall(dst_path)
+        zip_ref.close()
+        break
+      except zipfile.BadZipFile:
+        
+        if attempt == 4:
+          err_msg = ("Can't download EMNIST dataset. Try "
+                     "downloading EMNIST dataset manually and place the "
+                     "gzip.zip file to the parallel-tempring/simulator/data "
+                     "folder.")
+          raise ValueError(err_msg)
+        os.remove(gzip_path)
+        _maybe_download_emnist()
 
     def _read4bytes(bytestream):
       dtype = np.dtype(np.uint32).newbyteorder('>')
@@ -416,54 +430,28 @@ def get_emnist_letters(fname='emnist-letters-from-src.pkl'):
   return x_train, y_train, x_test, y_test, x_valid, y_valid
 
 def _maybe_download_emnist():
-  return 
-  gzip_path = os.path.dirname(__file__)
-  gzip_path = os.path.join(gzip_path, 'data')
-  dst_path = os.path.join(gzip_path, 'emnist_extracted')
-  gzip_path = os.path.join(gzip_path, 'gzip.zip')
-  filepath = gzip_path
-  if os.path.exists(gzip_path):
+
+  filepath = os.path.dirname(os.path.abspath(__file__))
+  filepath = os.path.join(filepath, 'data')
+  if not os.path.exists(filepath):
+    os.makedirs(filepath)
+  filename = EMNIST_URL.split('/')[-1]
+  filepath = os.path.join(filepath, filename) 
+  
+  if os.path.exists(filepath):
     return
-  def _progress(count, block_size, totol_size):
-    buff = '\r>> Downloading %s %1.f%%' % (
-        filename, float(count * block_size) / float(total_size) * 100.)
+  def _progress(count, block_size, total_size):
+    buff = '\r>> Downloading EMNIST %s %.1f%%' % (filename,
+            float(count * block_size) / float(total_size) * 100.0)
     sys.stdout.write(buff)
     sys.stdout.flush()
 
-  filepath, _ = urllib.request.urlretreive(
+  filepath, _ = urllib.request.urlretrieve(
     EMNIST_URL, filepath, _progress)
   print()
   statinfo = os.stat(filepath)
-  print('Successfully downloaded emnist dataset', statinfo.st_size, 'bytes.')
-'''
-  def _download_and_extract(self):
-    """Download from https://www.cs.toronto.edu/~kriz/cifar.html if the
-    the file is not located in the path"""
-    if not os.path.exists(self.data_dir):
-      os.makedirs(self.data_dir)
-    dest_directory = self.cifar10_dir
+  print('Successfully downloaded EMNIST dataset', statinfo.st_size, 'bytes.')
 
-    if not os.path.exists(dest_directory):
-      os.makedirs(dest_directory)
+if __name__ == '__main__':
 
-    filename = self.DATA_URL.split('/')[-1]
-    filepath = os.path.join(dest_directory, filename)
-
-
-    if not os.path.exists(filepath):
-      def _progress(count, block_size, total_size):
-        sys.stdout.write(
-            '\r>> Downloading %s %.1f%%' % (filename,
-            float(count * block_size) / float(total_size) * 100.0))
-        sys.stdout.flush()
-
-      filepath, _ = urllib.request.urlretrieve(
-          self.DATA_URL, filepath, _progress)
-      print()
-      statinfo = os.stat(filepath)
-      print('Successfully downloaded', filename, statinfo.st_size, 'bytes.')
-    extracted_dir_path = os.path.join(dest_directory, 'cifar-10-batches-py')
-    if not os.path.exists(extracted_dir_path):
-      tarfile.open(filepath, 'r:gz').extractall(dest_directory)
-    self.cifar10_dir = extracted_dir_path
-'''
+  _ = get_emnist_letters()
