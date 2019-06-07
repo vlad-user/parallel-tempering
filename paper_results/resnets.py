@@ -4,6 +4,7 @@ cwd = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(cwd)
 import gc
 
+import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage.filters import gaussian_filter1d
@@ -21,6 +22,7 @@ model_name = 'resnet20'
 dataset_name = 'cifar'
 loss_func_name = 'cross_entropy'
 train_data_size = 45000
+n_simulations = 1 # run each simulation `n_simulations` times
 
 description = 'reproduction of results'
 beta_0 = 0.014
@@ -28,7 +30,7 @@ beta_n = 0.009
 proba_coeff = 11
 burn_in_period_list = [32000, np.inf]
 batch_size = 128
-swap_step = 300
+swap_steps = [300, 3000]
 resnet_size = 20
 test_step = 352
 
@@ -41,8 +43,8 @@ noise_list = sorted(list(noise_list))
 scheduled_noise = {32000: noise_list,
                    1: [0.1 for _ in range(n_replicas)]}
 resnet20_names = []
-for burn_in_period in burn_in_period_list:
-    name = s_utils.generate_experiment_name(model=model_name,
+for burn_in_period, swap_step in zip(burn_in_period_list, swap_steps):
+    name = s_utils.generate_experiment_name(model_name=model_name,
                                             dataset_name=dataset_name,
                                             separation_ratio=0,
                                             n_replicas=n_replicas,
@@ -78,7 +80,7 @@ for burn_in_period in burn_in_period_list:
                     loss_func_name=loss_func_name,
                     proba_coeff=proba_coeff,
                     mode=None)
-
+    os.system('clear')
     sim.train(train_data_size=train_data_size,
               train_data=x_train,
               train_labels=y_train,
@@ -118,7 +120,7 @@ noise_list = sorted(list(noise_list))
 scheduled_noise = {32000: noise_list,
                    1: [0.1 for _ in range(n_replicas)]}
 resnet44_names = []
-for burn_in_period in burn_in_period_list:
+for burn_in_period, swap_step in zip(burn_in_period_list, swap_steps):
     name = s_utils.generate_experiment_name(model=model_name,
                                             dataset_name=dataset_name,
                                             separation_ratio=0,
@@ -155,7 +157,7 @@ for burn_in_period in burn_in_period_list:
                     loss_func_name=loss_func_name,
                     proba_coeff=proba_coeff,
                     mode=None)
-
+    os.system('clear')
     sim.train(train_data_size=train_data_size,
               train_data=x_train,
               train_labels=y_train,

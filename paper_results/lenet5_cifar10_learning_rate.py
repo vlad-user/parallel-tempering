@@ -25,12 +25,12 @@ train_data_size = 45000
 model = lenet5_lr_with_const_dropout
 model_name = 'lenet5'
 description = 'reproduction of results'
-beta_0 = .016
-beta_n = .006
-proba_coeff = 101000
+beta_0 = .015
+beta_n = .01
+proba_coeff = 300000
 batch_size = 128
 burn_in_period_list = [25000, np.inf] # <-- simulate with and without swaps
-swap_step = 600
+swap_step = 800
 mode = None 
 test_step = 352 # <-- number of steps between computations of test error
 timer = s_utils.Timer()
@@ -189,22 +189,24 @@ ax.plot(xnoswap_test, ynoswap_test_orig, alpha=alpha, linewidth=TLINEWIDTH, colo
 
 ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)
+
 FONTSIZE = 25
 
 
-top_line_y = [32, 32]
+top_line_y = [31, 31]
 ax.plot([0, 404*EPOCH_MULT], top_line_y, linestyle='--', color='black', linewidth=2.5, dashes=(8, 12))
-top_line_y = [30, 30]
+top_line_y = [29, 29]
 ax.plot([0, 404*EPOCH_MULT], top_line_y, linestyle='--', color='black', linewidth=2.5, dashes=(8, 12))
-top_line_y = [28, 28]
+top_line_y = [27, 27]
 ax.plot([0, 404*EPOCH_MULT], top_line_y, linestyle='--', color='black', linewidth=2.5, dashes=(8, 12))
 
-plt.yticks([28, 30, 32])
+plt.yticks([27, 29, 31])
 xticks = [20000, 40000, 60000, 80000, 100000, 120000, 140000]
 xlabels = ['20K', '40K', '60K', '80K', '100K', '120K', '140K']
 
-plt.ylim((27.95, 32.05))
+plt.ylim((26.95, 31.05))
 plt.xlim((0, 404*EPOCH_MULT))
+
 
 plt.yticks(fontsize=23)
 plt.xticks(xticks, xlabels, fontsize=23)
