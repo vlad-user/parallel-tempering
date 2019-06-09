@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from scipy.ndimage.filters import gaussian_filter1d
 
 from simulator.simulator import Simulator
+from simulator.summary_extractor import SummaryExtractor
 from simulator.models.cifar10_models import resnet
 from simulator import simulator_utils as s_utils
 from simulator import read_datasets
@@ -27,7 +28,7 @@ n_simulations = 1 # run each simulation `n_simulations` times
 description = 'reproduction of results'
 beta_0 = 0.014
 beta_n = 0.009
-proba_coeff = 11
+proba_coeff = 20
 burn_in_period_list = [32000, np.inf]
 batch_size = 128
 swap_steps = [300, 3000]
@@ -43,6 +44,8 @@ noise_list = sorted(list(noise_list))
 scheduled_noise = {32000: noise_list,
                    1: [0.1 for _ in range(n_replicas)]}
 resnet20_names = []
+#resnet20_names = ['resnet20_cifar_0_45000_8_0.014_crossentropy_300_32000_0.1_182_128_learningratemomentum_11_0.009_None_v3',
+#                  'resnet20_cifar_0_45000_8_0.014_crossentropy_3000_inf_0.1_182_128_learningratemomentum_11_0.009_None_v3']
 for burn_in_period, swap_step in zip(burn_in_period_list, swap_steps):
     name = s_utils.generate_experiment_name(model_name=model_name,
                                             dataset_name=dataset_name,
@@ -60,7 +63,7 @@ for burn_in_period, swap_step in zip(burn_in_period_list, swap_steps):
                                             proba_coeff=proba_coeff,
                                             train_data_size=train_data_size,
                                             mode=None)
-
+    #continue
     ensembles = resnet(tf.Graph(), n_replicas, resnet_size)
     resnet20_names.append(name)
     sim = Simulator(model=None,
@@ -105,7 +108,7 @@ train_data_size = 45000
 description = 'reproduction of results'
 beta_0 = 0.014
 beta_n = 0.009
-proba_coeff = 5
+proba_coeff = 30
 burn_in_period_list = [32000, np.inf]
 batch_size = 128
 swap_step = 300
@@ -120,8 +123,10 @@ noise_list = sorted(list(noise_list))
 scheduled_noise = {32000: noise_list,
                    1: [0.1 for _ in range(n_replicas)]}
 resnet44_names = []
+#resnet44_names = ['resnet44_cifar_0_45000_8_0.014_crossentropy_300_32000_0.1_182_128_learningratemomentum_5_0.009_None_v3',
+#                  'resnet44_cifar_0_45000_8_0.014_crossentropy_3000_inf_0.1_182_128_learningratemomentum_5_0.009_None_v3']
 for burn_in_period, swap_step in zip(burn_in_period_list, swap_steps):
-    name = s_utils.generate_experiment_name(model=model_name,
+    name = s_utils.generate_experiment_name(model_name=model_name,
                                             dataset_name=dataset_name,
                                             separation_ratio=0,
                                             n_replicas=n_replicas,
@@ -137,7 +142,7 @@ for burn_in_period, swap_step in zip(burn_in_period_list, swap_steps):
                                             proba_coeff=proba_coeff,
                                             train_data_size=train_data_size,
                                             mode=None)
-
+    #continue
     ensembles = resnet(tf.Graph(), n_replicas, resnet_size)
     resnet44_names.append(name)
     sim = Simulator(model=None,
@@ -169,8 +174,29 @@ for burn_in_period, swap_step in zip(burn_in_period_list, swap_steps):
     del ensembles
     gc.collect()
 
-swap20, noswap20 = resnet20_names[0], renset20_names[1]
+def get_min_err_and_rid(se):
+    results = []
+    for r in range(se.get_description()['n_replicas']):
+        x, y = se.get_summary('test_error', replica_id=r)
+        results.append(min(y))
+    min_err = min(results)
+    min_rid = np.argmin(results)
+    return min_err, min_rid
+
+def interpolate(x, y, sigma=1):
+    ynew = gaussian_filter1d(y, sigma=sigma)
+    return x, ynew
+
+fig, ax = plt.subplots(figsize=(12, 8))
+colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+EPOCH_MULT = np.ceil(45000/128)
+
+swap20, noswap20 = resnet20_names[0], resnet20_names[1]
 swap44, noswap44 = resnet44_names[0], resnet44_names[1]
+swap_sim_num20 = 0
+noswap_sim_num20 = 0
+
+
 
 se_swap20 = SummaryExtractor(swap20)
 se_noswap20 = SummaryExtractor(noswap20)
@@ -249,14 +275,14 @@ xnoswap_test44, ynoswap_test44 = interpolate(xnoswap_test44, ynoswap_test44, sig
 xnoswap_train44, ynoswap_train44 = interpolate(xnoswap_train44, ynoswap_train44, sigma=sigma)
 
 alpha = 0.3
-n_replicas = se_swap.get_description()['n_replicas']
+n_replicas = se_swap20.get_description()['n_replicas']
 label = '$ResNet 20\  \gamma\in {0} {1:.3f}, ..., {2:.3f} {3}^{4} $'.format(
     '\{', min(swapnoise_list20), max(swapnoise_list20), '\}', 8)
 ax.plot(xswap_test20, yswap_test20, label=label, color=colors[0], linewidth=5)
 ax.plot(xswap_test20, yswap_test_orig20, alpha=alpha, linewidth=5, color=colors[0])
 ax.plot(xnoswap_test20, ynoswap_test20, label='ResNet20 $\gamma^*={0:.4f}$'.format(0.0114), color=colors[0], linewidth=4, linestyle='--')
 
-n_replicas = se_swap.get_description()['n_replicas']
+n_replicas = se_swap44.get_description()['n_replicas']
 label = '$ResNet 44\  \gamma\in {0} {1:.3f}, ..., {2:.2f} {3}^{4} $'.format(
     '\{', min(swapnoise_list44), max(swapnoise_list44), '\}', n_replicas)
 ax.plot(xswap_test44, yswap_test44, label=label, color=colors[2], linewidth=5)
@@ -295,4 +321,9 @@ leg.get_frame().set_linewidth(3)
 
 ax.set_rasterized(True)
 plt.savefig('_images/cifar-resnets.eps', bbox_inches='tight')
-plt.show()
+#plt.show()
+plt.close()
+
+se_swap20._plot_mixing_resnet()
+ax.set_rasterized(True)
+plt.savefig('_images/resnets-mixing.eps')
